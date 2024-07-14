@@ -2,6 +2,7 @@ import pathlib
 import hashlib
 import os
 import base64
+import time
 
 
 # TODO: make this a config value.
@@ -11,9 +12,14 @@ os.makedirs(index_dir, exist_ok=True)
 
 def make_hashes(filenames):
     for filename in filenames:
-        file_hash = _get_file_hash(filename)
+        if not _is_hash_changed(filename):
+            continue
+
         filename_b64 = _get_b64_filename(filename)
-        pathlib.Path(filename_b64).write_text(file_hash)
+        file_hash = _get_file_hash(filename)
+        creation_time = time.time_ns()
+        text = f'{file_hash}\n{creation_time}'
+        pathlib.Path(filename_b64).write_text(text)
 
 
 def _get_file_hash(filename):
@@ -26,6 +32,7 @@ def _get_file_hash(filename):
     return file_hash
 
 
+# TODO: set a global config for `encoding`.
 def _get_b64_filename(filename, encoding='utf-8'):
     return os.path.join(
             index_dir,
@@ -33,27 +40,57 @@ def _get_b64_filename(filename, encoding='utf-8'):
             )
 
 
-def _is_hash_changed(filename, encoding='utf-8', must_exist=True):
-    filename_b64 = _get_b64_filename(filename, encoding)
+def _hash_exists(filename):
+    filename_b64 = _get_b64_filename(filename)
+    if os.path.exists(filename) and os.path.exists(filename_b64):
+        return filename_b64
+    return ''
 
-    files_exist = os.path.exists(filename) and os.path.exists(filename_b64)
-    if not files_exist:
-        if must_exist:
-            return True
-        return False
+
+def _is_hash_changed(filename, must_exist=True):
+    '''
+    Checks if a file's hash has changed from its stored hash.
+
+    Returns:
+        When the file is not found or its hash has not been stored,
+        then True if `must_exist` is True, otherwise False.
+
+        When both the file exists and its hash has been stored,
+        then regardless of the value of `must_exist`, True if
+        the newly generated hash is different from the stored hash,
+        False otherwise.
+    '''
+    if not (filename_b64 := _hash_exists(filename)):
+        return must_exist
 
     file_hash = _get_file_hash(filename)
-    stored_hash = pathlib.Path(filename_b64).read_text()
+    stored_hash = pathlib.Path(filename_b64).read_text().split()[0]
     return file_hash != stored_hash
+
+
+def _get_hash_creation_time(filename):
+    if (filename_b64 := _hash_exists(filename)):
+        return int(pathlib.Path(filename_b64).read_text().split()[1])
+    return 0
+
+
+def _is_newer(filename, timestamp):
+    '''
+    '''
+    return _get_hash_creation_time(filename) > timestamp
 
 
 def should_task_run(graph):
     def _should_it(task_name):
         task = graph[task_name]
 
+        oldest_time = float('inf')
         # If any outputs or their hashes don't exist, the task should run.
-        if any(_is_hash_changed(f) for f in task.get_targets()):
-            return (task_name, '')
+        for f in task.get_targets():
+            if _is_hash_changed(f):
+                return (task_name, '')
+            if (hash_time := _get_hash_creation_time(f)) < oldest_time:
+                oldest_time = hash_time
 
         # If any inputs have a new hash, the task should run.
         if any(_is_hash_changed(f) for f in task.get_required_files()):
@@ -62,8 +99,11 @@ def should_task_run(graph):
         # If any outputs of required tasks have a new hash, the
         # task should run.
         for req in task.required_tasks:
-            if any(_is_hash_changed(f, must_exist=False) for f in graph[req].get_targets()):
-                return (req, '')
+            for f in graph[req].get_targets():
+                if _is_hash_changed(f, must_exist=False):
+                    return (req, '')
+                if _is_newer(f, oldest_time):
+                    return (req, '')
 
         return tuple()
 
