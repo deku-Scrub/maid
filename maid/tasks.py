@@ -34,7 +34,7 @@ def _handle_function_error(task, err):
             )
 
 
-def _get_filenames(filenames):
+def _get_filenames(filenames, must_exist=True):
     for f in filenames:
         dirname, basename = os.path.split(f)
 
@@ -44,8 +44,14 @@ def _get_filenames(filenames):
         elif not dirname:
             yield basename
         else:
+            has_files = False
             for p in pathlib.Path(dirname).glob(basename):
                 yield str(p)
+                has_files = True
+            if (not has_files) and must_exist:
+                raise FileNotFoundError('Required file not found: {}'.format(f))
+            if (not has_files) and (not must_exist):
+                yield f
 
 
 class Task:
@@ -123,7 +129,7 @@ class Task:
     def get_targets(self):
         '''
         '''
-        return _get_filenames(self.targets)
+        return _get_filenames(self.targets, must_exist=False)
 
     def get_required_files(self):
         '''
