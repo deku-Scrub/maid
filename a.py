@@ -33,7 +33,7 @@ class A:
             print_script=sys.stdout,
             print_script_output=sys.stdout,
             delete_targets_on_error=True,
-            dont_run_if_all_targets_exist=False,
+            dont_run_if_all_targets_exist=False, # o
             description='',
             ):
         self.required_pipelines = required_pipelines if required_pipelines else []
@@ -126,6 +126,18 @@ class A:
         for line in processes[-1].stdout:
            yield line
 
+
+   def _should_run(self):
+       '''
+       '''
+        filenames = task.get_filenames(self.targets, must_exist=False)
+        all_targets_exist = all(os.path.exists(f) for f in filenames)
+        if not all_targets_exist:
+            return True, f'missing target `{f}`'
+        if self.dont_run_if_all_targets_exist:
+            return False, ''
+        if self.cache == CacheType.NONE:
+            return True, 'uncached pipeline'
 
 pipeline = A(
         'p1',
