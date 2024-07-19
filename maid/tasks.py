@@ -45,7 +45,7 @@ def _get_filenames(filenames, must_exist=True):
             yield basename
         else:
             has_files = False
-            for p in pathlib.Path(dirname).glob(basename):
+            for p in pathlib.Path(dirname).glob(basename.replace('\\', '\\\\')):
                 yield str(p)
                 has_files = True
             if (not has_files) and must_exist:
@@ -71,8 +71,8 @@ class Task:
             delete_targets_on_error=True,
             print_script=sys.stdout,
             print_script_output=sys.stdout,
-            always_run_if_in_graph=False, # TODO: test.  Used in task_runner.
-            dont_run_if_all_targets_exist=False, # TODO: test, task_runner.
+            always_run_if_in_graph=False,
+            dont_run_if_all_targets_exist=False,
             #run_at_start=False, # TODO: test. Seems only used in worker.
             #run_at_end=False, # TODO: test. Seems only used in worker.
             shell=None,
@@ -107,12 +107,6 @@ class Task:
         if name in required_tasks:
             raise Exception()
 
-        # TODO: move this to worker.
-        #if run_at_start and required_tasks:
-            #raise Exception()
-        #if run_at_end and required_tasks:
-            #raise Exception()
-
         self.name = name
         self.recipe = recipe
         self.targets = tuple(targets if targets else [])
@@ -136,7 +130,7 @@ class Task:
         '''
         return _get_filenames(self.required_files)
 
-    def run(self, modified_tasks=None):
+    def run(self, *, modified_tasks=None):
         '''
         '''
         if (script := self._run_recipe(modified_tasks=modified_tasks)):
@@ -167,7 +161,7 @@ class Task:
         if (code := result.returncode) != 0:
             err = f'Script failed to run successfully: return code {code}'
             _throw_script_error(self, err)
-        return result.returncode, result.stderr if result.stderr else ''
+        return 0, result.stderr if result.stderr else ''
 
     def _run_recipe(self, modified_tasks=None):
         script = ''
@@ -210,11 +204,10 @@ class WorkRequest:
             startup_tasks,
             main_tasks,
             teardown_tasks,
-            dry_run=False,
+            dry_run=False, # TODO: test
             use_hash=False,
             update_requested=False,
             finish_depth_on_failure=False,
-            store_modified_tasks=False,
             ):
         '''
         '''
@@ -227,7 +220,6 @@ class WorkRequest:
         self.use_hash = use_hash
         self.update_requested = update_requested
         self.finish_depth_on_failure = finish_depth_on_failure
-        self.store_modified_tasks = store_modified_tasks
 
 
 class PythonFunctionException(Exception):
