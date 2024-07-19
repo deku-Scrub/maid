@@ -58,7 +58,8 @@ def _should_task_run(graph, use_hash=False):
     def f(task_name):
         task = graph[task_name]
         if task.dont_run_if_all_targets_exist:
-            # TODO: what to do when no targets?
+            # TODO: what to do when no targets?  `all` evaluates
+            # to `True` when there are no targets.  Is this appropriate?
             if all(os.path.exists(f) for f in task.get_targets()):
                 return tuple()
         if task.always_run_if_in_graph:
@@ -129,6 +130,8 @@ def run(workreq):
 
 
 def _print_dry_run(start_nodes, sorted_tasks, workreq):
+    idx = 1
+
     print('Startup tasks:')
     for idx, task in enumerate(workreq.startup_tasks, 1):
         print('  {}) {}'.format(idx, task))
