@@ -65,12 +65,12 @@ class A:
 
     def __gt__(self, rhs):
         self._outfile = rhs
-        self._mode = 'wb'
+        self._mode = 'wt'
         return self
 
     def __rshift__(self, rhs):
         self._outfile = rhs
-        self._mode = 'ab'
+        self._mode = 'at'
         return self
 
     def __or__(self, rhs):
@@ -182,6 +182,7 @@ class A:
                     stdin=subprocess.PIPE,
                     stdout=subprocess.PIPE,
                     shell=True,
+                    text=True,
                     ),
                 ]
         for cmd in commands[1:]:
@@ -190,6 +191,7 @@ class A:
                     stdin=processes[-1].stdout,
                     stdout=subprocess.PIPE,
                     shell=True,
+                    text=True,
                     )
             processes.append(process)
 
@@ -245,7 +247,7 @@ class A:
 
 pipeline = A(
         'p1',
-        inputs=[b'lol\n', b'.lol\n'],
+        inputs=['lol\n', '.lol\n'],
         required_files=['requirements.txt'],
         targets=['a.txt'],
         cache=CacheType.HASH,
@@ -253,7 +255,7 @@ pipeline = A(
 pipeline = pipeline \
         | "sed 's/lol/md/'" \
         | "grep .md" \
-        | (lambda o: (oj.strip()+b'?' for oj in o)) \
+        | (lambda o: (oj.strip()+'?' for oj in o)) \
         | "tr '.' '!'" \
         > pipeline.targets[0]
 pipeline2 = A('p2', required_pipelines=[pipeline]) | "cat a.txt"
