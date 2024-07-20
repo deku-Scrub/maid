@@ -14,6 +14,13 @@ def update_files(filenames):
     maid.monitor.hash.make_hashes(maid.tasks.get_filenames(filenames))
 
 
+def _any_files_missing(filenames, must_exist=True):
+    for f in maid.tasks.get_filenames(filenames, must_exist=must_exist):
+        if not os.path.exists(f):
+            return f
+    return ''
+
+
 class RunPhase(enum.Enum):
     NORMAL = 0
     START = 1
@@ -155,9 +162,9 @@ class A:
             iterables = [self.inputs] + self._iterables
             for inputs, commands in zip(iterables, self._commands):
                 if callable(inputs):
-                    outputs = self._run(inputs(outputs), commands)
+                    outputs = self._run_pipeline(inputs(outputs), commands)
                 else:
-                    outputs = self._run(inputs, commands)
+                    outputs = self._run_pipeline(inputs, commands)
         except Exception as err:
             msg = 'Error running pipeline `{}`: {}'.format(self.name, err)
             maid.error_utils.remove_files_and_throw(
@@ -176,62 +183,63 @@ class A:
 
         return outputs
 
-    def _run(self, inputs, commands):
-        processes = [
-            subprocess.Popen(
-                    commands[0],
-                    stdin=subprocess.PIPE,
-                    stdout=subprocess.PIPE,
-                    shell=True,
-                    text=True,
-                    ),
-                ]
-        for cmd in commands[1:]:
-            process = subprocess.Popen(
-                    cmd,
-                    stdin=processes[-1].stdout,
-                    stdout=subprocess.PIPE,
-                    shell=True,
-                    text=True,
-                    )
-            processes.append(process)
+    def _make_process(self, cmd, stdin):
+        '''
+        Make process with the necessary common parameters.
+        '''
+        return subprocess.Popen(
+                cmd,
+                stdin=stdin,
+                stdout=subprocess.PIPE,
+                shell=True,
+                text=True,
+                )
 
+    def _run_pipeline(self, inputs, commands):
+        # Hook up command outputs to inputs.
+        processes = [self._make_process(commands[0], subprocess.PIPE)]
+        for cmd in commands[1:]:
+            processes.append(self._make_process(cmd, processes[-1].stdout))
+
+        # Write to first command.
         for cur_input in inputs:
            processes[0].stdin.write(cur_input)
         processes[0].stdin.flush()
         processes[0].stdin.close()
 
+        # Yield output of last command.
         for line in processes[-1].stdout:
            yield line
-
-    def _any_files_missing(self, filenames, must_exist=True):
-        for f in maid.tasks.get_filenames(filenames, must_exist=must_exist):
-            if not os.path.exists(f):
-                return f
-        return ''
 
     def _should_run(self):
         '''
         '''
-        if (f := self._any_files_missing(self.targets, must_exist=False)):
+        # Checks based on file existance.
+        if (f := _any_files_missing(self.targets, must_exist=False)):
             return True, f'missing target `{f}`'
         if self._dont_run_if_all_targets_exist:
             return False, ''
+
+        # Checks based on cache type.
         if self._cache == CacheType.NONE:
             return True, 'uncached pipeline'
-        if self._cache == CacheType.HASH:
-            if maid.monitor.hash.should_task_run(self._get_graph())(self.name):
-                return True, 'targets out of date'
-            return False, ''
+        return self._should_run_cache()
+
+    def _should_run_cache(self):
+        # Get appropriate decision function.
+        should_task_run = maid.monitor.hash.should_task_run
         if self._cache == CacheType.TIME:
-            if maid.monitor.time.should_task_run(self._get_graph())(self.name):
-                return True, 'targets out of date'
-            return False, ''
+            should_task_run = maid.monitor.time.should_task_run
+
+        if should_task_run(self._get_graph())(self.name):
+            return True, 'targets out of date'
         return False, ''
 
     def _get_graph(self):
         '''
         '''
+        # This is the graph required for the time and hash cache
+        # decision functions.
         graph = {
             p.name: maid.tasks.Task(
                     p.name,
@@ -245,7 +253,9 @@ class A:
                     lambda a: a, # This doesn't matter; never runs.
                     targets=self.targets,
                     required_files=self.required_files,
-                    required_tasks=tuple([p.name for p in self.required_pipelines]),
+                    required_tasks=tuple(
+                        [p.name for p in self.required_pipelines]
+                        ),
                     )
         return graph
 
@@ -255,7 +265,7 @@ pipeline = A(
         inputs=['lol\n', '.lol\n'],
         required_files=['requirements.txt'],
         targets=['a.txt'],
-        cache=CacheType.TIME,
+        cache=CacheType.HASH,
         )
 pipeline = pipeline \
         | "sed 's/lol/md/'" \
