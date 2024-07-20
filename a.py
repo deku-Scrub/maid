@@ -53,6 +53,49 @@ def _add_task(maid_name, pipeline, is_default, run_phase):
         _maid.finally_pipelines[pipeline.name] = pipeline
 
 
+class Pipeline:
+    '''
+    '''
+
+    def __init__(self, commands=None):
+        self._commands = commands if commands else []
+
+    def append(self, cmd):
+        self._commands.append(cmd)
+
+    def _make_process(self, cmd, stdin):
+        '''
+        Make process with the necessary common parameters.
+        '''
+        return subprocess.Popen(
+                cmd,
+                stdin=stdin,
+                stdout=subprocess.PIPE,
+                shell=True,
+                text=True,
+                )
+
+    def __str__(self):
+        return '\n'.join(self._commands)
+
+    def __call__(self, inputs=None):
+        inputs = inputs if inputs else tuple()
+
+        # Hook up command outputs to inputs.
+        processes = [self._make_process(self._commands[0], subprocess.PIPE)]
+        for cmd in self._commands[1:]:
+            processes.append(self._make_process(cmd, processes[-1].stdout))
+
+        # Write to first command.
+        for cur_input in inputs:
+            processes[0].stdin.write(cur_input)
+        processes[0].stdin.flush()
+        processes[0].stdin.close()
+
+        # Yield output of last command.
+        yield from processes[-1].stdout
+
+
 class M:
     '''
     '''
@@ -176,8 +219,7 @@ class A:
         self.required_pipelines = tuple(required_pipelines) if required_pipelines else tuple()
         self.required_files = tuple(required_files) if required_files else tuple()
         self.targets = tuple(targets) if targets else tuple()
-        self._pipelines = [[]]
-        self._iterables = []
+        self._commands = []
         self._outfile = ''
         self._mode = ''
         self._finish_depth_on_failure = finish_depth_on_failure
@@ -220,38 +262,24 @@ class A:
         Add `rhs`'s command to this object's command list.
         '''
         if isinstance(rhs, str):
-            self._pipelines[-1].append(rhs)
-        elif isinstance(rhs, A):
-            self._pipelines[-1].append(rhs.cmd)
-        #elif callable(rhs):
-            #self._callables.append(rhs)
-        else:
-            self._pipelines.append([])
-            self._iterables.append(rhs)
+            if (not self._commands) or (not isinstance(self._commands[-1], Pipeline)):
+                self._commands.append(Pipeline())
+            self._commands[-1].append(rhs)
+        elif callable(rhs):
+            self._commands.append(rhs)
         return self
 
     def __str__(self):
         '''
         Return a string representation of this object's pipeline.
         '''
-        s = []
-        iterables = ['<inputs>' if self.inputs else '<no inputs>' ] + self._iterables
-        #iterables = [self.inputs] + self._iterables
-        for j, (inputs, pipeline) in enumerate(zip(iterables, self._pipelines)):
-            if j == 0:
-                s.append('' + str(inputs))
-            else:
-                s.append('    | ' + str(inputs))
-            for k, cmd in enumerate(pipeline):
-                if (k == 0) and (not self.inputs):
-                    s.append('    ' + cmd)
-                else:
-                    s.append('    | ' + cmd)
+        s = [str(c) for c in self._commands]
+        s = '\n'.join(s).replace('\n', '\n    | ')
         if self._mode.startswith('w'):
-            s.append('    > ' + self._outfile)
+            s += '\n    > ' + self._outfile
         elif self._mode.startswith('a'):
-            s.append('    >> ' + self._outfile)
-        return '\n'.join(s)
+            s += '\n    >> ' + self._outfile
+        return s
 
     def _wrap_visited(self, f):
         '''
@@ -276,6 +304,8 @@ class A:
         '''
         f = lambda : '\n'.join(p.dry_run(verbose) for p in self.required_pipelines if p.name not in A._visited)
 
+        # This goes before anything below it because `_should_run`
+        # depends on the traversal's output.
         output = self._wrap_visited(f)
 
         if (should := self._should_run()) and not should[0]:
@@ -292,17 +322,15 @@ class A:
         '''.format(
             self.name,
                  should[1],
-                 self.__str__(),
+                 str(self),
                 )
         return output
 
-    def _print_scripts(self, inputs, pipeline):
+    def _print_scripts(self, command):
         if not self._script_stream:
             return
 
-        if callable(inputs):
-            self._script_stream.write(str(inputs) + '\n')
-        self._script_stream.writelines('\n'.join(pipeline) + '\n')
+        self._script_stream.write(str(command) + '\n')
 
     def run(self):
         '''
@@ -355,14 +383,11 @@ class A:
         '''
         Logic for running the pipeline.
         '''
-        outputs = tuple()
-        iterables = [self.inputs] + self._iterables
-        for inputs, pipeline in zip(iterables, self._pipelines):
-            self._print_scripts(inputs, pipeline)
-            # If given a function, its output is `pipeline`'s input.
-            new_inputs = inputs(outputs) if callable(inputs) else inputs
-            outputs = self._run_pipeline(new_inputs, pipeline)
-        return outputs
+        inputs = self.inputs
+        for command in self._commands:
+            self._print_scripts(command)
+            inputs = command(inputs)
+        return inputs # ie, outputs.
 
     def _run(self):
         '''
@@ -389,33 +414,6 @@ class A:
             if self._output_stream:
                 self._output_stream.writelines(outputs)
         _make_hashes(self._cache, self.targets, self.required_files)
-
-    def _make_process(self, cmd, stdin):
-        '''
-        Make process with the necessary common parameters.
-        '''
-        return subprocess.Popen(
-                cmd,
-                stdin=stdin,
-                stdout=subprocess.PIPE,
-                shell=True,
-                text=True,
-                )
-
-    def _run_pipeline(self, inputs, pipeline):
-        # Hook up command outputs to inputs.
-        processes = [self._make_process(pipeline[0], subprocess.PIPE)]
-        for cmd in pipeline[1:]:
-            processes.append(self._make_process(cmd, processes[-1].stdout))
-
-        # Write to first command.
-        for cur_input in inputs:
-            processes[0].stdin.write(cur_input)
-        processes[0].stdin.flush()
-        processes[0].stdin.close()
-
-        # Yield output of last command.
-        yield from processes[-1].stdout
 
     def _should_run(self):
         '''
@@ -479,6 +477,7 @@ p1 = (
         | "sed 's/lol/md/'"
         | "grep .md"
         | (lambda o: (oj.strip()+'?' for oj in o))
+        | (lambda o: (oj.strip()+'m' for oj in o))
         | "tr 'm' '!'"
         > p1.targets[0]
      )
