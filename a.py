@@ -155,7 +155,7 @@ class A:
         Return a string containing all steps that a call to `run`
         would execute.
         '''
-        output = '\n'.join(p.dry_run() for p in self.required_pipelines if pipeline.name not in A._visited)
+        output = '\n'.join(p.dry_run() for p in self.required_pipelines if p.name not in A._visited)
         if (should := self._should_run()) and should[0]:
             output += '''
             \r########################################
@@ -181,7 +181,7 @@ class A:
         '''
         Run pipeline.
         '''
-        is_root = False if A._visited else True
+        is_root = not A._visited
         A._visited.add(self.name)
 
         try:
@@ -294,13 +294,12 @@ class A:
 
         # Write to first command.
         for cur_input in inputs:
-           processes[0].stdin.write(cur_input)
+            processes[0].stdin.write(cur_input)
         processes[0].stdin.flush()
         processes[0].stdin.close()
 
         # Yield output of last command.
-        for line in processes[-1].stdout:
-           yield line
+        yield from processes[-1].stdout
 
     def _should_run(self):
         '''
@@ -351,7 +350,7 @@ class A:
         return graph
 
 
-pipeline = A(
+p1 = A(
         'p1',
         inputs=['lol\n', '.lol\n'],
         required_files=['requirements.txt'],
@@ -359,19 +358,18 @@ pipeline = A(
         cache=CacheType.HASH,
         script_stream=sys.stdout,
         )
-pipeline = pipeline \
+p1 = p1 \
         | "sed 's/lol/md/'" \
         | "grep .md" \
         | (lambda o: (oj.strip()+'?' for oj in o)) \
         | "tr 'm' '!'" \
-        > pipeline.targets[0]
-pipeline2 = A(
+        > p1.targets[0]
+p2 = A(
         'p2',
-        required_pipelines=[pipeline],
+        required_pipelines=[p1],
         output_stream=sys.stdout,
         script_stream=sys.stdout,
         ) \
     | "cat a.txt"
-print(pipeline2.dry_run())
-output = pipeline2.run()
-print(list(output))
+print(p2.dry_run())
+print(list(p2.run()))
