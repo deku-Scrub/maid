@@ -83,10 +83,11 @@ class M:
 
     def run(self, pipeline_name=''):
         outputs = tuple()
+        main_pipeline = self._get_pipeline(pipeline_name)
         try:
             for _, pipeline in self.start_pipelines:
                 pipeline.run()
-            outputs = self._get_pipeline(pipeline_name).run()
+            outputs = main_pipeline.run()
             for _, pipeline in self.end_pipelines:
                 pipeline.run()
         except Exception as err:
@@ -472,10 +473,10 @@ p2 = A(
         'p2',
         required_pipelines=[p1],
         output_stream=sys.stdout,
-        script_stream=sys.stdout,
+        script_stream=sys.stderr,
         is_default=True,
         ) \
     | f"cat {p1.targets[0]}"
 
-print(get_maid().dry_run())
-print(list(get_maid().run()))
+print(get_maid().dry_run(), file=sys.stderr)
+sys.stdout.writelines(get_maid().run())
