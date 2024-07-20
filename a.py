@@ -15,12 +15,42 @@ def get_maid(maid_name=DEFAULT_MAID_NAME):
     return maids.setdefault(maid_name, M(maid_name))
 
 
-def _add_task(maid_name, pipeline, is_default):
+def _add_task(maid_name, pipeline, is_default, run_phase):
     _maid = get_maid(maid_name)
-    if is_default and not _maid.default_pipeline:
+
+    if is_default:
+        if run_phase != RunPhase.NORMAL:
+            raise Exception(
+                    'Only pipelines in the `NORMAL` run phase can be a default; was given `` for pipeline ``.'.format(
+                        run_phase,
+                        pipeline.name,
+                        )
+                    )
+        if _maid.default_pipeline:
+            raise Exception(
+                    'Maid `{}` already has default pipeline `{}`.'.format(
+                        maid_name,
+                        _maid.default_pipeline,
+                        )
+                    )
         _maid.default_pipeline = pipeline.name
-    if not pipeline.name in _maid.pipelines:
+
+    if pipeline.name in _maid.pipelines:
+        raise Exception(
+                'Maid `{}` already has pipeline named `{}`.'.format(
+                    maid_name,
+                    pipeline.name,
+                    )
+                )
+
+    if run_phase == RunPhase.NORMAL:
         _maid.pipelines[pipeline.name] = pipeline
+    elif run_phase == RunPhase.START:
+        _maid.start_pipelines[pipeline.name] = pipeline
+    elif run_phase == RunPhase.END:
+        _maid.end_pipelines[pipeline.name] = pipeline
+    elif run_phase == RunPhase.FINALLY:
+        _maid.finally_pipelines[pipeline.name] = pipeline
 
 
 class M:
@@ -31,12 +61,40 @@ class M:
         self.name = name
         self.default_pipeline = ''
         self.pipelines = dict()
+        self.start_pipelines = dict()
+        self.end_pipelines = dict()
+        self.finally_pipelines = dict()
 
     def dry_run(self, pipeline_name=''):
-        return self._get_pipeline(pipeline_name).dry_run()
+        r = '\n'.join(p.dry_run() for p in self.start_pipelines.values())
+        r += '\n' + self._get_pipeline(pipeline_name).dry_run()
+
+        re = '\n'.join(p.dry_run() for p in self.end_pipelines.values())
+        if re:
+            r += '\n#### These run only if the previous run without error.'
+            r += '\n' + re
+
+        rf = '\n'.join(p.dry_run() for p in self.finally_pipelines.values())
+        if rf:
+            r += '\n#### These run regardless of any error.'
+            r += '\n' + rf
+
+        return r
 
     def run(self, pipeline_name=''):
-        return self._get_pipeline(pipeline_name).run()
+        ouputs = tuple()
+        try:
+            for _, pipeline in self.start_pipelines:
+                pipeline.run()
+            outputs = self._get_pipeline(pipeline_name).run()
+            for _, pipeline in self.end_pipelines:
+                pipeline.run()
+        except Exception as err:
+            raise err
+        finally:
+            for _, pipeline in self.finally_pipelines:
+                pipeline.run()
+        return outputs
 
     def _get_pipeline(self, pipeline_name):
         if pipeline_name in self.pipelines:
@@ -100,7 +158,7 @@ class A:
             required_files=None, # o
             targets=None, # o
             cache=CacheType.NONE, # o
-            run_phase=RunPhase.NORMAL,
+            run_phase=RunPhase.NORMAL, # o
             is_default=False, # o
             independent_targets=False,
             script_stream=None, # o
@@ -129,8 +187,9 @@ class A:
         self._script_stream = script_stream
         self._maid_name = maid_name
         self._is_default = is_default
+        self._independent_targets = independent_targets
 
-        _add_task(self._maid_name, self, self._is_default)
+        _add_task(self._maid_name, self, self._is_default, run_phase)
 
     def __gt__(self, rhs):
         '''
