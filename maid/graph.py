@@ -1,168 +1,70 @@
+# TODO:
+#   * pass to recipe files that have changed (make's `$?`)
+#   * independent targets (run script per target, not once with all targets)
+#   * map_targets (how required file is mapped to target, (both have `*.ext`))
+#   * not parallel (run task in parallel or no (put it in its own depth))
+#   * vpath (directories in which to search for files)
 import os
-import subprocess
+import logging
+
+logger = logging.getLogger(__name__)
+index_dir = os.path.join('.maid', 'index')
+os.makedirs(index_dir, exist_ok=True)
+
+def get_subgraph(graph, root_node):
+    visited = set()
+    subgraph = {root_node: set()}
+    q = [root_node]
+    root_nodes = []
+    while q:
+        node = q.pop(0)
+        if not graph[node].required_tasks:
+            root_nodes.append(node)
+        visited.add(node)
+        q.extend(c for c in graph[node].required_tasks if c not in visited)
+        for c in graph[node].required_tasks:
+            subgraph.setdefault(c, set()).add(node)
+
+    logger.debug('roots: %s', root_nodes)
+    logger.debug('subgraph: %s', subgraph)
+
+    return subgraph, root_nodes
 
 
-def _do_all_files_exists(filenames):
-    for filename in filenames:
-        if not os.path.exists(filename):
-            return False, filename
-    return True, ''
+def get_start_nodes(graph, root_nodes, is_start_node):
+    visited = set()
+    start_nodes = []
+    q = list(root_nodes)
+    while q:
+        node = q.pop(0)
+        visited.add(node)
+        if (s := is_start_node(node)):
+            start_nodes.append((node, s[0], s[1]))
+            continue
+        q.extend(c for c in graph[node] if c not in visited)
+
+    logger.debug('starts: %s', start_nodes)
+
+    return start_nodes
 
 
-def _is_newer(filename, other_time):
-    if not os.path.exists(filename):
-        return True
-    return os.path.getmtime(filename) > other_time
-
-
-def _is_up_to_date(target, reqs, graph):
-    if not os.path.exists(target):
-        return False
-
-    target_time = os.path.getmtime(target)
-    for req in reqs:
-        cur_reqs = graph[req]['outputs'] if req in graph else (req,)
-        if any(_is_newer(r, target_time) for r in cur_reqs):
-            return False
-    return True
-
-
-class Graph:
-    '''
-    '''
-
-    def __init__(self):
-        '''
-        '''
-        self._graph = dict()
-
-    def update(self, graph):
-        '''
-        '''
-        for k, v in graph.items():
-            if k in self._graph:
-                raise Exception('Error when updating graph: task name already exists: {}'.format(k))
-            if 'inputs' not in v:
-                raise Exception('Error when updating graph: task `{}` is missing the `inputs` field.  If it has no inputs, set `inputs` to an empty list.'.format(k))
-            if 'outputs' not in v:
-                raise Exception('Error when updating graph: task `{}` is missing the `outputs` field.  If it has no outputs, set `outputs` to an empty list.'.format(k))
-            if 'function' not in v:
-                raise Exception('Error when updating graph: task `{}` is missing the `function` field.  If it has no outputs, set `outputs` to an empty list.'.format(k))
-            if type(v['inputs']) != tuple:
-                raise Exception('Error when updating graph: value of task `{}`\'s `inputs` field is not a tuple.'.format(k))
-            if type(v['outputs']) != tuple:
-                raise Exception('Error when updating graph: value of task `{}`\'s `outputs` field is not a tuple.'.format(k))
-            if type(v['function']) != type(lambda x: 1):
-                raise Exception('Error when updating graph: value of task `{}`\'s `function` field is not a function.'.format(k))
-            self._graph[k] = v
-
-    def dry_run(self, task):
-        '''
-        '''
-        self._run(task, dry=True)
-
-    def run(self, task):
-        '''
-        '''
-        self._run(task, dry=False)
-
-    def _is_root_node(inputs, graph):
-        return all(i not in graph for i in inputs)
-
-    def _validate_graph(graph):
-        for k, v in graph.items():
-            if Graph._is_root_node(v['inputs'], graph):
-                if (ret := _do_all_files_exists(v['inputs'])) and ret[0]:
-                    continue
-                # TODO: make new exception class with this message
-                msg = 'Root task `{}` is missing required file `{}`.  Root tasks depend on either nothing or on files that already exist.  You might have forgotten to generate the missing file, or the task is not a root and you forgot to add to `inputs` the task that generates the file.'.format(k, ret[1])
-                raise Exception(msg)
-
-    def _run(self, task, dry=True):
-        '''
-        '''
-        if task not in self._graph:
-            raise Exception('Error running graph: task name never defined: {}'.format(task))
-        Graph._validate_graph(self._graph)
-
-        subgraph, root_nodes = Graph._get_subgraph(task, self._graph)
-        nodes = Graph._topological_sort(subgraph, root_nodes)
-
-        for node, _ in nodes:
-            inputs = self._graph[node]['inputs']
-            outputs = self._graph[node]['outputs']
-
-            if all(_is_up_to_date(o, inputs, self._graph) for o in outputs):
+def topo_sort(graph, root_nodes):
+    visited = set()
+    q = list((n, 0) for n in root_nodes)
+    node_to_idx = {n: d for n, d in q}
+    while q:
+        node, depth = q.pop(0)
+        visited.add(node)
+        child_depth = depth + 1
+        for child in graph[node]:
+            prev_idx = node_to_idx.setdefault(child, 0)
+            node_to_idx[child] = max(prev_idx, child_depth)
+            if child in visited:
                 continue
+            q.append((child, child_depth))
 
-            if dry:
-                print('will run task `{}`'.format(node))
-                continue
+    sorted_tasks = sorted((i for i in node_to_idx.items()), key=lambda i: i[1])
 
-            script = self._graph[node]['function'](inputs, outputs)
-            if not self._run_script(script):
-                # TODO: remove outputs?
-                print('Error running task `{}`.'.format(node))
-                return
+    logger.debug('sorted: %s', sorted_tasks)
 
-    def _run_script(self, script):
-        print('{}'.format(script))
-        results = None
-        results = subprocess.run(['bash', '-c', script], capture_output=True)
-
-        if results.returncode == 0:
-            return True
-
-        print(results.stderr.decode('utf-8'))
-        return False
-
-    def _get_subgraph(root, graph):
-        '''
-        '''
-        queued_nodes = [root]
-        visited = set()
-        root_nodes = []
-        subgraph = dict()
-        while queued_nodes:
-            node = queued_nodes.pop(0)
-
-            if node in visited:
-                # TODO: detect loops.
-                continue
-
-            visited.add(node)
-            subgraph.setdefault(node, [])
-
-            is_root_node = True
-            for child in graph[node]['inputs'][::-1]:
-                if child in graph:
-                    queued_nodes.append(child)
-                    subgraph.setdefault(child, []).append(node)
-                    is_root_node = False
-
-            if is_root_node:
-                root_nodes.append(node)
-
-        return subgraph, root_nodes
-
-    def _topological_sort(graph, root_nodes):
-        '''
-        '''
-        node_to_idx = {node: 0 for node in graph}
-        for root_node in root_nodes:
-            queued_nodes = [(root_node, 0)]
-            visited = set()
-            while queued_nodes:
-                node, depth = queued_nodes.pop(0)
-
-                if node in visited:
-                    continue
-
-                visited.add(node)
-
-                for child in graph[node]:
-                    queued_nodes.append((child, depth + 1))
-                    node_to_idx[child] = max(node_to_idx[child], depth + 1)
-
-        sorted_nodes = sorted(node_to_idx.items(), key=lambda p: p[1])
-        return sorted_nodes
+    return sorted_tasks
