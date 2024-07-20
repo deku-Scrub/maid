@@ -153,20 +153,20 @@ class A:
     def _should_run(self):
         '''
         '''
-        filenames = task.get_filenames(self.targets, must_exist=False)
+        filenames = maid.tasks.get_filenames(self.targets, must_exist=False)
         all_targets_exist = all(os.path.exists(f) for f in filenames)
         if not all_targets_exist:
             return True, f'missing target `{f}`'
-        if self.dont_run_if_all_targets_exist:
+        if self._dont_run_if_all_targets_exist:
             return False, ''
-        if self.cache == CacheType.NONE:
+        if self._cache == CacheType.NONE:
             return True, 'uncached pipeline'
-        if self.cache == CacheType.HASH:
-            if maid.monitor.hash.should_run(self._graph)(self.name):
+        if self._cache == CacheType.HASH:
+            if maid.monitor.hash.should_task_run(self._graph)(self.name):
                 return True, 'targets out of date'
             return False, ''
-        if self.cache == CacheType.TIME:
-            if maid.monitor.time.should_run(self._graph)(self.name):
+        if self._cache == CacheType.TIME:
+            if maid.monitor.time.should_task_run(self._graph)(self.name):
                 return True, 'targets out of date'
             return False, ''
         return False, ''
