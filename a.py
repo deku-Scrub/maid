@@ -29,6 +29,8 @@ class CacheType(enum.Enum):
 
 class A:
 
+    _visited = set()
+
     def __init__(
             self,
             name,
@@ -118,7 +120,7 @@ class A:
         return '\n'.join(s)
 
     def dry_run(self):
-        output = '\n'.join(p.dry_run() for p in self.required_pipelines)
+        output = '\n'.join(p.dry_run() for p in self.required_pipelines if pipeline.name not in A._visited)
         if (should := self._should_run()) and should[0]:
             output += '''
             \r########################################
@@ -133,8 +135,21 @@ class A:
         return output
 
     def run(self):
+        is_root = False if A._visited else True
+        A._visited.add(self.name)
+        try:
+            return self._setup_run()
+        except Exception as err:
+            raise err
+        finally:
+            if is_root:
+                A._visited.clear()
+
+    def _setup_run(self):
         error = None
         for pipeline in self.required_pipelines:
+            if pipeline.name in A._visited:
+                continue
             try:
                 pipeline.run()
             except Exception as err:
@@ -145,11 +160,11 @@ class A:
             raise error
 
         if not self._should_run()[0]:
-            return
+            return tuple()
         if self._update_requested:
             update_files(self.targets)
             update_files(self.required_files)
-            return
+            return tuple()
 
         try:
             iterables = [self.inputs] + self._iterables
