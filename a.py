@@ -40,6 +40,8 @@ class A:
             dont_run_if_all_targets_exist=False, # o
             description='',
             finish_depth_on_failure=False,
+            #update_requested=False,
+            dry_run=False,
             ):
         self.name = name
         self.inputs = tuple(inputs) if inputs else tuple()
@@ -123,6 +125,8 @@ class A:
 
         if not self._should_run():
             return
+        if dry_run:
+            return self.__str__()
 
         try:
             iterables = [self.inputs] + self._iterables
