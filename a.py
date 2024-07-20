@@ -63,22 +63,6 @@ class A:
         self._cache = cache
         self._update_requested = update_requested
 
-        self._graph = {
-            p.name: maid.tasks.Task(
-                    p.name,
-                    lambda a: a, # This doesn't matter; never runs.
-                    targets=p.targets,
-                    )
-            for p in self.required_pipelines
-        }
-        self._graph[name] = maid.tasks.Task(
-                    name,
-                    lambda a: a, # This doesn't matter; never runs.
-                    targets=self.targets,
-                    required_files=self.required_files,
-                    required_tasks=tuple([p.name for p in self.required_pipelines]),
-                    )
-
     def __gt__(self, rhs):
         self._outfile = rhs
         self._mode = 'wb'
@@ -229,14 +213,34 @@ class A:
         if self._cache == CacheType.NONE:
             return True, 'uncached pipeline'
         if self._cache == CacheType.HASH:
-            if maid.monitor.hash.should_task_run(self._graph)(self.name):
+            if maid.monitor.hash.should_task_run(self._get_graph())(self.name):
                 return True, 'targets out of date'
             return False, ''
         if self._cache == CacheType.TIME:
-            if maid.monitor.time.should_task_run(self._graph)(self.name):
+            if maid.monitor.time.should_task_run(self._get_graph())(self.name):
                 return True, 'targets out of date'
             return False, ''
         return False, ''
+
+    def _get_graph(self):
+        '''
+        '''
+        graph = {
+            p.name: maid.tasks.Task(
+                    p.name,
+                    lambda a: a, # This doesn't matter; never runs.
+                    targets=p.targets,
+                    )
+            for p in self.required_pipelines
+        }
+        graph[self.name] = maid.tasks.Task(
+                    self.name,
+                    lambda a: a, # This doesn't matter; never runs.
+                    targets=self.targets,
+                    required_files=self.required_files,
+                    required_tasks=tuple([p.name for p in self.required_pipelines]),
+                    )
+        return graph
 
 
 pipeline = A(
