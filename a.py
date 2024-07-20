@@ -39,6 +39,7 @@ class A:
             delete_targets_on_error=True,
             dont_run_if_all_targets_exist=False, # o
             description='',
+            finish_depth_on_failure=False,
             ):
         self.name = name
         self.inputs = tuple(inputs) if inputs else tuple()
@@ -49,6 +50,9 @@ class A:
         self._iterables = []
         self._outfile = ''
         self._mode = ''
+        self._finish_depth_on_failure = finish_depth_on_failure
+        self._dont_run_if_all_targets_exist = dont_run_if_all_targets_exist
+        self._cache = cache
 
         self._graph = {
             p.name: maid.tasks.Task(
@@ -106,22 +110,39 @@ class A:
         return '\n'.join(s)
 
     def run(self):
+        error = None
         for pipeline in self.required_pipelines:
-            pipeline.run()
+            try:
+                pipeline.run()
+            except Exception as err:
+                error = error if error else err
+                if not self._finish_depth_on_failure:
+                    raise error
+        if error:
+            raise error
+
         if not self._should_run():
             return
 
-        iterables = [self.inputs] + self._iterables
-        for inputs, commands in zip(iterables, self._commands):
-            if callable(inputs):
-                outputs = self._run(inputs(outputs), commands)
-            else:
-                outputs = self._run(inputs, commands)
+        try:
+            iterables = [self.inputs] + self._iterables
+            for inputs, commands in zip(iterables, self._commands):
+                if callable(inputs):
+                    outputs = self._run(inputs(outputs), commands)
+                else:
+                    outputs = self._run(inputs, commands)
+        except Exception as err:
+            msg = 'Error running pipeline `{}`: {}'.format(self.name, err)
+            maid.error_utils.remove_files_and_throw(
+                    maid.tasks.get_filenames(self.targets) if self.delete_targets_on_error else [],
+                    Exception(msg),
+                    )
 
         if self._outfile:
             with open(self._outfile, mode=self._mode) as fos:
                 for line in outputs:
                     fos.write(line)
+
         return outputs
 
     def _run(self, inputs, commands):
