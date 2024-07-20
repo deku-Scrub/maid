@@ -9,6 +9,11 @@ import maid.monitor.hash
 import maid.monitor.time
 
 
+def update_files(filenames):
+    maid.monitor.time.touch_files(maid.tasks.get_filenames(filenames))
+    maid.monitor.hash.make_hashes(maid.tasks.get_filenames(filenames))
+
+
 class RunPhase(enum.Enum):
     NORMAL = 0
     START = 1
@@ -40,7 +45,7 @@ class A:
             dont_run_if_all_targets_exist=False, # o
             description='',
             finish_depth_on_failure=False,
-            #update_requested=False,
+            update_requested=False,
             dry_run=False,
             ):
         self.name = name
@@ -55,6 +60,8 @@ class A:
         self._finish_depth_on_failure = finish_depth_on_failure
         self._dont_run_if_all_targets_exist = dont_run_if_all_targets_exist
         self._cache = cache
+        self._dry_run = dry_run
+        self._update_requested = update_requested
 
         self._graph = {
             p.name: maid.tasks.Task(
@@ -125,8 +132,12 @@ class A:
 
         if not self._should_run():
             return
-        if dry_run:
+        if self._dry_run:
             return self.__str__()
+        if self._update_requested:
+            update_files(self.targets)
+            update_files(self.required_files)
+            return
 
         try:
             iterables = [self.inputs] + self._iterables
