@@ -33,21 +33,21 @@ class A:
 
     def __init__(
             self,
-            name,
-            inputs=None,
-            required_pipelines=None,
-            required_files=None,
-            targets=None,
+            name, # o
+            inputs=None, # o
+            required_pipelines=None, # o
+            required_files=None, # o
+            targets=None, # o
             cache=CacheType.NONE, # o
             run_phase=RunPhase.NORMAL,
             is_default=False,
             print_script=sys.stdout,
             print_script_output=sys.stdout,
-            delete_targets_on_error=True,
+            delete_targets_on_error=True, #o
             dont_run_if_all_targets_exist=False, # o
             description='',
-            finish_depth_on_failure=False,
-            update_requested=False,
+            finish_depth_on_failure=False, # o
+            update_requested=False, # o
             ):
         self.name = name
         self.inputs = tuple(inputs) if inputs else tuple()
@@ -62,6 +62,7 @@ class A:
         self._dont_run_if_all_targets_exist = dont_run_if_all_targets_exist
         self._cache = cache
         self._update_requested = update_requested
+        self._delete_targets_on_error = delete_targets_on_error
 
     def __gt__(self, rhs):
         self._outfile = rhs
@@ -160,7 +161,7 @@ class A:
         except Exception as err:
             msg = 'Error running pipeline `{}`: {}'.format(self.name, err)
             maid.error_utils.remove_files_and_throw(
-                    maid.tasks.get_filenames(self.targets) if self.delete_targets_on_error else [],
+                    maid.tasks.get_filenames(self.targets) if self._delete_targets_on_error else [],
                     Exception(msg),
                     )
 
