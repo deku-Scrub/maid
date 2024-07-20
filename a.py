@@ -64,6 +64,7 @@ class A:
             cache=CacheType.NONE, # o
             run_phase=RunPhase.NORMAL,
             is_default=False,
+            independent_targets=False,
             script_stream=None, # o
             output_stream=None, # o
             delete_targets_on_error=True, #o
@@ -133,12 +134,12 @@ class A:
         s = []
         iterables = ['<inputs>' if self.inputs else '<no inputs>' ] + self._iterables
         #iterables = [self.inputs] + self._iterables
-        for j, (inputs, commands) in enumerate(zip(iterables, self._pipelines)):
+        for j, (inputs, pipeline) in enumerate(zip(iterables, self._pipelines)):
             if j == 0:
                 s.append('' + str(inputs))
             else:
                 s.append('    | ' + str(inputs))
-            for k, cmd in enumerate(commands):
+            for k, cmd in enumerate(pipeline):
                 if (k == 0) and (not self.inputs):
                     s.append('    ' + cmd)
                 else:
@@ -167,6 +168,14 @@ class A:
                      self.__str__(),
                     )
         return output
+
+    def _print_scripts(self, inputs, pipeline):
+        if not self._script_stream:
+            return
+
+        if callable(inputs):
+            self._script_stream.write(str(inputs) + '\n')
+        self._script_stream.writelines('\n'.join(pipeline) + '\n')
 
     def run(self):
         '''
@@ -233,6 +242,7 @@ class A:
         outputs = tuple()
         iterables = [self.inputs] + self._iterables
         for inputs, pipeline in zip(iterables, self._pipelines):
+            self._print_scripts(inputs, pipeline)
             # If given a function, its output is `pipeline`'s input.
             new_inputs = inputs(outputs) if callable(inputs) else inputs
             outputs = self._run_pipeline(new_inputs, pipeline)
@@ -276,13 +286,10 @@ class A:
                 text=True,
                 )
 
-    def _run_pipeline(self, inputs, commands):
-        if self._script_stream:
-            self._script_stream.writelines('\n'.join(commands) + '\n')
-
+    def _run_pipeline(self, inputs, pipeline):
         # Hook up command outputs to inputs.
-        processes = [self._make_process(commands[0], subprocess.PIPE)]
-        for cmd in commands[1:]:
+        processes = [self._make_process(pipeline[0], subprocess.PIPE)]
+        for cmd in pipeline[1:]:
             processes.append(self._make_process(cmd, processes[-1].stdout))
 
         # Write to first command.
@@ -350,12 +357,13 @@ pipeline = A(
         required_files=['requirements.txt'],
         targets=['a.txt'],
         cache=CacheType.HASH,
+        script_stream=sys.stdout,
         )
 pipeline = pipeline \
         | "sed 's/lol/md/'" \
         | "grep .md" \
         | (lambda o: (oj.strip()+'?' for oj in o)) \
-        | "tr '.' '!'" \
+        | "tr 'm' '!'" \
         > pipeline.targets[0]
 pipeline2 = A(
         'p2',
