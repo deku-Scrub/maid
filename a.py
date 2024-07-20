@@ -46,7 +46,6 @@ class A:
             description='',
             finish_depth_on_failure=False,
             update_requested=False,
-            dry_run=False,
             ):
         self.name = name
         self.inputs = tuple(inputs) if inputs else tuple()
@@ -60,7 +59,6 @@ class A:
         self._finish_depth_on_failure = finish_depth_on_failure
         self._dont_run_if_all_targets_exist = dont_run_if_all_targets_exist
         self._cache = cache
-        self._dry_run = dry_run
         self._update_requested = update_requested
 
         self._graph = {
@@ -102,7 +100,8 @@ class A:
         return self
 
     def __str__(self):
-        s = [str(p) for p in self.required_pipelines]
+        #s = [str(p) for p in self.required_pipelines]
+        s = []
         iterables = ['<inputs>'] + self._iterables
         #iterables = [self.inputs] + self._iterables
         for j, (inputs, commands) in enumerate(zip(iterables, self._commands)):
@@ -118,6 +117,21 @@ class A:
             s.append('    >> ' + self._outfile)
         return '\n'.join(s)
 
+    def dry_run(self):
+        output = '\n'.join(p.dry_run() for p in self.required_pipelines)
+        if (should := self._should_run()) and should[0]:
+            output += '''
+            \r########################################
+            \r# Pipeline `{}` will run due to {}
+            \r{}
+            \r########################################
+            '''.format(
+                self.name,
+                     should[1],
+                     self.__str__(),
+                    )
+        return output
+
     def run(self):
         error = None
         for pipeline in self.required_pipelines:
@@ -130,10 +144,8 @@ class A:
         if error:
             raise error
 
-        if not self._should_run():
+        if not self._should_run()[0]:
             return
-        if self._dry_run:
-            return self.__str__()
         if self._update_requested:
             update_files(self.targets)
             update_files(self.required_files)
@@ -226,6 +238,6 @@ pipeline = pipeline \
         | "tr '.' '!'" \
         > pipeline.targets[0]
 pipeline2 = A('p2', required_pipelines=[pipeline]) | "cat a.txt"
+print(pipeline2.dry_run())
 output = pipeline2.run()
-print(pipeline2)
 print(list(output))
