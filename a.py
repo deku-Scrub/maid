@@ -143,6 +143,10 @@ class A:
                 for line in outputs:
                     fos.write(line)
 
+        if self._cache == CacheType.HASH:
+            maid.monitor.hash.make_hashes(maid.tasks.get_filenames(self.targets))
+            maid.monitor.hash.make_hashes(maid.tasks.get_filenames(self.required_files))
+
         return outputs
 
     def _run(self, inputs, commands):
