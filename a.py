@@ -17,11 +17,12 @@ def _make_hashes(cache, *files):
 
 def _write_to_file(lines, filename, mode):
     if not filename:
-        return
+        return False
 
     with open(filename, mode=mode) as fos:
         for line in lines:
             fos.write(line)
+    return True
 
 
 def update_files(filenames):
@@ -63,8 +64,8 @@ class A:
             cache=CacheType.NONE, # o
             run_phase=RunPhase.NORMAL,
             is_default=False,
-            print_script=sys.stdout,
-            print_script_output=sys.stdout,
+            script_stream=None, # o
+            output_stream=None, # o
             delete_targets_on_error=True, #o
             dont_run_if_all_targets_exist=False, # o
             description='',
@@ -85,6 +86,8 @@ class A:
         self._cache = cache
         self._update_requested = update_requested
         self._delete_targets_on_error = delete_targets_on_error
+        self._output_stream = output_stream
+        self._script_stream = script_stream
 
     def __gt__(self, rhs):
         '''
@@ -256,7 +259,9 @@ class A:
         '''
         Run functions that require the pipeline to have finished.
         '''
-        _write_to_file(outputs, self._outfile, self._mode)
+        if not _write_to_file(outputs, self._outfile, self._mode):
+            if self._output_stream:
+                self._output_stream.writelines(outputs)
         _make_hashes(self._cache, self.targets, self.required_files)
 
     def _make_process(self, cmd, stdin):
@@ -272,6 +277,9 @@ class A:
                 )
 
     def _run_pipeline(self, inputs, commands):
+        if self._script_stream:
+            self._script_stream.writelines('\n'.join(commands) + '\n')
+
         # Hook up command outputs to inputs.
         processes = [self._make_process(commands[0], subprocess.PIPE)]
         for cmd in commands[1:]:
@@ -349,7 +357,13 @@ pipeline = pipeline \
         | (lambda o: (oj.strip()+'?' for oj in o)) \
         | "tr '.' '!'" \
         > pipeline.targets[0]
-pipeline2 = A('p2', required_pipelines=[pipeline]) | "cat a.txt"
+pipeline2 = A(
+        'p2',
+        required_pipelines=[pipeline],
+        output_stream=sys.stdout,
+        script_stream=sys.stdout,
+        ) \
+    | "cat a.txt"
 print(pipeline2.dry_run())
 output = pipeline2.run()
 print(list(output))
