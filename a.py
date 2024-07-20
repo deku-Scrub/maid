@@ -7,6 +7,43 @@ import maid.tasks
 import maid.monitor.hash
 import maid.monitor.time
 
+DEFAULT_MAID_NAME = 'm0'
+maids = dict()
+
+
+def get_maid(maid_name=DEFAULT_MAID_NAME):
+    return maids.setdefault(maid_name, M(maid_name))
+
+
+def _add_task(maid_name, pipeline, is_default):
+    _maid = get_maid(maid_name)
+    if is_default and not _maid.default_pipeline:
+        _maid.default_pipeline = pipeline.name
+    if not pipeline.name in _maid.pipelines:
+        _maid.pipelines[pipeline.name] = pipeline
+
+
+class M:
+    '''
+    '''
+
+    def __init__(self, name):
+        self.name = name
+        self.default_pipeline = ''
+        self.pipelines = dict()
+
+    def dry_run(self, pipeline_name=''):
+        return self._get_pipeline(pipeline_name).dry_run()
+
+    def run(self, pipeline_name=''):
+        return self._get_pipeline(pipeline_name).run()
+
+    def _get_pipeline(self, pipeline_name):
+        if pipeline_name in self.pipelines:
+            return self.pipelines[pipeline_name]
+        elif self.default_pipeline:
+            return self.pipelines[self.default_pipeline]
+
 
 def _make_hashes(cache, *files):
     if cache != CacheType.HASH:
@@ -57,13 +94,14 @@ class A:
     def __init__(
             self,
             name, # o
+            maid_name=DEFAULT_MAID_NAME, # o
             inputs=None, # o
             required_pipelines=None, # o
             required_files=None, # o
             targets=None, # o
             cache=CacheType.NONE, # o
             run_phase=RunPhase.NORMAL,
-            is_default=False,
+            is_default=False, # o
             independent_targets=False,
             script_stream=None, # o
             output_stream=None, # o
@@ -89,6 +127,10 @@ class A:
         self._delete_targets_on_error = delete_targets_on_error
         self._output_stream = output_stream
         self._script_stream = script_stream
+        self._maid_name = maid_name
+        self._is_default = is_default
+
+        _add_task(self._maid_name, self, self._is_default)
 
     def __gt__(self, rhs):
         '''
@@ -358,18 +400,22 @@ p1 = A(
         cache=CacheType.HASH,
         script_stream=sys.stdout,
         )
-p1 = p1 \
-        | "sed 's/lol/md/'" \
-        | "grep .md" \
-        | (lambda o: (oj.strip()+'?' for oj in o)) \
-        | "tr 'm' '!'" \
+p1 = (
+        p1
+        | "sed 's/lol/md/'"
+        | "grep .md"
+        | (lambda o: (oj.strip()+'?' for oj in o))
+        | "tr 'm' '!'"
         > p1.targets[0]
+     )
 p2 = A(
         'p2',
         required_pipelines=[p1],
         output_stream=sys.stdout,
         script_stream=sys.stdout,
+        is_default=True,
         ) \
-    | "cat a.txt"
-print(p2.dry_run())
-print(list(p2.run()))
+    | f"cat {p1.targets[0]}"
+
+print(get_maid().dry_run())
+print(list(get_maid().run()))
