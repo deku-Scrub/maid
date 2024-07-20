@@ -65,16 +65,16 @@ class M:
         self.end_pipelines = dict()
         self.finally_pipelines = dict()
 
-    def dry_run(self, pipeline_name=''):
-        r = '\n'.join(p.dry_run() for p in self.start_pipelines.values())
-        r += '\n' + self._get_pipeline(pipeline_name).dry_run()
+    def dry_run(self, pipeline_name='', long=False):
+        r = '\n'.join(p.dry_run(long) for p in self.start_pipelines.values())
+        r += '\n' + self._get_pipeline(pipeline_name).dry_run(long)
 
-        re = '\n'.join(p.dry_run() for p in self.end_pipelines.values())
+        re = '\n'.join(p.dry_run(long) for p in self.end_pipelines.values())
         if re:
             r += '\n#### These run only if the previous run without error.'
             r += '\n' + re
 
-        rf = '\n'.join(p.dry_run() for p in self.finally_pipelines.values())
+        rf = '\n'.join(p.dry_run(long) for p in self.finally_pipelines.values())
         if rf:
             r += '\n#### These run regardless of any error.'
             r += '\n' + rf
@@ -253,23 +253,29 @@ class A:
             s.append('    >> ' + self._outfile)
         return '\n'.join(s)
 
-    def dry_run(self):
+    def dry_run(self, long=False):
         '''
         Return a string containing all steps that a call to `run`
         would execute.
         '''
-        output = '\n'.join(p.dry_run() for p in self.required_pipelines if p.name not in A._visited)
-        if (should := self._should_run()) and should[0]:
-            output += '''
-            \r########################################
-            \r# Pipeline `{}` will run due to {}
-            \r{}
-            \r########################################
-            '''.format(
-                self.name,
-                     should[1],
-                     self.__str__(),
-                    )
+        output = '\n'.join(p.dry_run(long) for p in self.required_pipelines if p.name not in A._visited)
+
+        if (should := self._should_run()) and not should[0]:
+            return ''
+
+        if not long:
+            return '{}\n{} ({})'.format(output, self.name, should[1])
+
+        output += '''
+        \r########################################
+        \r# Pipeline `{}` will run due to {}
+        \r{}
+        \r########################################
+        '''.format(
+            self.name,
+                 should[1],
+                 self.__str__(),
+                )
         return output
 
     def _print_scripts(self, inputs, pipeline):
@@ -478,5 +484,5 @@ p2 = A(
         ) \
     | f"cat {p1.targets[0]}"
 
-print(get_maid().dry_run(), file=sys.stderr)
+print(get_maid().dry_run(long=True), file=sys.stderr)
 sys.stdout.writelines(get_maid().run())
