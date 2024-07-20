@@ -4,6 +4,10 @@ import sys
 import subprocess
 import multiprocessing
 
+import maid.tasks
+import maid.monitor.hash
+import maid.monitor.time
+
 
 class RunPhase(enum.Enum):
     NORMAL = 0
@@ -27,7 +31,7 @@ class A:
             required_pipelines=None,
             required_files=None,
             targets=None,
-            cache=CacheType.NONE,
+            cache=CacheType.NONE, # o
             run_phase=RunPhase.NORMAL,
             is_default=False,
             print_script=sys.stdout,
@@ -36,13 +40,31 @@ class A:
             dont_run_if_all_targets_exist=False, # o
             description='',
             ):
-        self.required_pipelines = required_pipelines if required_pipelines else []
-        self.inputs = inputs if inputs else []
-        self.targets = targets if targets else []
+        self.name = name
+        self.inputs = tuple(inputs) if inputs else tuple()
+        self.required_pipelines = tuple(required_pipelines) if required_pipelines else tuple()
+        self.required_files = tuple(required_files) if required_files else tuple()
+        self.targets = tuple(targets) if targets else tuple()
         self._commands = [[]]
         self._iterables = []
         self._outfile = ''
         self._mode = ''
+
+        self._graph = {
+            p.name: maid.tasks.Task(
+                    p.name,
+                    lambda a: a, # This doesn't matter; never runs.
+                    targets=p.targets,
+                    )
+            for p in self.required_pipelines
+        }
+        self._graph[name] = maid.tasks.Task(
+                    name,
+                    lambda a: a, # This doesn't matter; never runs.
+                    targets=self.targets,
+                    required_files=self.required_files,
+                    required_tasks=tuple([p.name for p in self.required_pipelines]),
+                    )
 
     def __gt__(self, rhs):
         self._outfile = rhs
@@ -86,6 +108,8 @@ class A:
     def run(self):
         for pipeline in self.required_pipelines:
             pipeline.run()
+        if not self._should_run():
+            return
 
         iterables = [self.inputs] + self._iterables
         for inputs, commands in zip(iterables, self._commands):
@@ -126,10 +150,9 @@ class A:
         for line in processes[-1].stdout:
            yield line
 
-
-   def _should_run(self):
-       '''
-       '''
+    def _should_run(self):
+        '''
+        '''
         filenames = task.get_filenames(self.targets, must_exist=False)
         all_targets_exist = all(os.path.exists(f) for f in filenames)
         if not all_targets_exist:
@@ -138,12 +161,21 @@ class A:
             return False, ''
         if self.cache == CacheType.NONE:
             return True, 'uncached pipeline'
+        if self.cache == CacheType.HASH:
+            if maid.monitor.hash.should_run(self._graph)(self.name):
+                return True, 'targets out of date'
+            return False, ''
+        if self.cache == CacheType.TIME:
+            if maid.monitor.time.should_run(self._graph)(self.name):
+                return True, 'targets out of date'
+            return False, ''
+        return False, ''
+
 
 pipeline = A(
         'p1',
         inputs=[b'lol\n', b'.lol\n'],
-        required_files=[b'lol\n', b'.lol\n'],
-        #required_pipelines=[b'lol\n', b'.lol\n'],
+        required_files=['requirements.txt'],
         targets=['a.txt'],
         cache=CacheType.HASH,
         )
