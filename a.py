@@ -65,16 +65,16 @@ class M:
         self.end_pipelines = dict()
         self.finally_pipelines = dict()
 
-    def dry_run(self, pipeline_name='', long=False):
-        r = '\n'.join(p.dry_run(long) for p in self.start_pipelines.values())
-        r += '\n' + self._get_pipeline(pipeline_name).dry_run(long)
+    def dry_run(self, pipeline_name='', verbose=False):
+        r = '\n'.join(p.dry_run(verbose) for p in self.start_pipelines.values())
+        r += '\n' + self._get_pipeline(pipeline_name).dry_run(verbose)
 
-        re = '\n'.join(p.dry_run(long) for p in self.end_pipelines.values())
+        re = '\n'.join(p.dry_run(verbose) for p in self.end_pipelines.values())
         if re:
             r += '\n#### These run only if the previous run without error.'
             r += '\n' + re
 
-        rf = '\n'.join(p.dry_run(long) for p in self.finally_pipelines.values())
+        rf = '\n'.join(p.dry_run(verbose) for p in self.finally_pipelines.values())
         if rf:
             r += '\n#### These run regardless of any error.'
             r += '\n' + rf
@@ -269,19 +269,19 @@ class A:
             if is_root:
                 A._visited.clear()
 
-    def dry_run(self, long=False):
+    def dry_run(self, verbose=False):
         '''
         Return a string containing all steps that a call to `run`
         would execute.
         '''
-        f = lambda : '\n'.join(p.dry_run(long) for p in self.required_pipelines if p.name not in A._visited)
+        f = lambda : '\n'.join(p.dry_run(verbose) for p in self.required_pipelines if p.name not in A._visited)
 
         output = self._wrap_visited(f)
 
         if (should := self._should_run()) and not should[0]:
             return ''
 
-        if not long:
+        if not verbose:
             return '{}\n{} ({})'.format(output, self.name, should[1])
 
         output += '''
@@ -491,5 +491,5 @@ p2 = A(
         ) \
     | f"cat {p1.targets[0]}"
 
-print(get_maid().dry_run(long=True), file=sys.stderr)
+print(get_maid().dry_run(verbose=True), file=sys.stderr)
 sys.stdout.writelines(get_maid().run())
