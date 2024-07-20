@@ -34,6 +34,10 @@ def _handle_function_error(task, err):
             )
 
 
+def get_filenames(filenames, must_exist=True):
+    return _get_filenames(filenames, must_exist=must_exist)
+
+
 def _get_filenames(filenames, must_exist=True):
     for f in filenames:
         dirname, basename = os.path.split(f)
