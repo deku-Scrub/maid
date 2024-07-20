@@ -21,7 +21,7 @@ def _add_task(maid_name, pipeline, is_default, run_phase):
     if is_default:
         if run_phase != RunPhase.NORMAL:
             raise Exception(
-                    'Only pipelines in the `NORMAL` run phase can be a default; was given `` for pipeline ``.'.format(
+                    'Only pipelines in the `NORMAL` run phase can be a default; was given `{}` for pipeline `{}`.'.format(
                         run_phase,
                         pipeline.name,
                         )
@@ -82,7 +82,7 @@ class M:
         return r
 
     def run(self, pipeline_name=''):
-        ouputs = tuple()
+        outputs = tuple()
         try:
             for _, pipeline in self.start_pipelines:
                 pipeline.run()
@@ -99,8 +99,9 @@ class M:
     def _get_pipeline(self, pipeline_name):
         if pipeline_name in self.pipelines:
             return self.pipelines[pipeline_name]
-        elif self.default_pipeline:
+        if self.default_pipeline:
             return self.pipelines[self.default_pipeline]
+        raise Exception('Unknown pipeline.  Maid `{}` has no pipeline named `{}`'.format(self.name, pipeline_name))
 
 
 def _make_hashes(cache, *files):
