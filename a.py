@@ -253,12 +253,30 @@ class A:
             s.append('    >> ' + self._outfile)
         return '\n'.join(s)
 
+    def _wrap_visited(self, f):
+        '''
+        Reset visited after running f.
+        '''
+        is_root = not A._visited
+        A._visited.add(self.name)
+        try:
+            return f()
+        except Exception as err:
+            raise err
+        finally:
+            # Clear visited list once the pipeline has finished
+            # so that other pipelines can run correctly.
+            if is_root:
+                A._visited.clear()
+
     def dry_run(self, long=False):
         '''
         Return a string containing all steps that a call to `run`
         would execute.
         '''
-        output = '\n'.join(p.dry_run(long) for p in self.required_pipelines if p.name not in A._visited)
+        f = lambda : '\n'.join(p.dry_run(long) for p in self.required_pipelines if p.name not in A._visited)
+
+        output = self._wrap_visited(f)
 
         if (should := self._should_run()) and not should[0]:
             return ''
@@ -290,18 +308,7 @@ class A:
         '''
         Run pipeline.
         '''
-        is_root = not A._visited
-        A._visited.add(self.name)
-
-        try:
-            return self._run()
-        except Exception as err:
-            raise err
-        finally:
-            # Clear visited list once the pipeline has finished
-            # so that other pipelines can run correctly.
-            if is_root:
-                A._visited.clear()
+        return self._wrap_visited(self._run)
 
     def _run_dependencies(self):
         error = None
