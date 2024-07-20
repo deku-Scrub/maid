@@ -204,12 +204,16 @@ class A:
         for line in processes[-1].stdout:
            yield line
 
+    def _any_files_missing(self, filenames, must_exist=True):
+        for f in maid.tasks.get_filenames(filenames, must_exist=must_exist):
+            if not os.path.exists(f):
+                return f
+        return ''
+
     def _should_run(self):
         '''
         '''
-        filenames = maid.tasks.get_filenames(self.targets, must_exist=False)
-        all_targets_exist = all(os.path.exists(f) for f in filenames)
-        if not all_targets_exist:
+        if (f := self._any_files_missing(self.targets, must_exist=False)):
             return True, f'missing target `{f}`'
         if self._dont_run_if_all_targets_exist:
             return False, ''
@@ -251,7 +255,7 @@ pipeline = A(
         inputs=['lol\n', '.lol\n'],
         required_files=['requirements.txt'],
         targets=['a.txt'],
-        cache=CacheType.HASH,
+        cache=CacheType.TIME,
         )
 pipeline = pipeline \
         | "sed 's/lol/md/'" \
