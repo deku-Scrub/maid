@@ -4,6 +4,7 @@ import sys
 import subprocess
 
 import maid.tasks
+import maid.task_runner
 import maid.monitor.hash
 import maid.monitor.time
 
@@ -15,20 +16,10 @@ def get_maid(maid_name=DEFAULT_MAID_NAME):
     return maids.setdefault(maid_name, M(maid_name))
 
 
-def _remove_task(maid_name, task_name, run_phase):
-    _maid = get_maid(maid_name)
-
-    if run_phase == RunPhase.NORMAL:
-        _maid.pipelines.pop(task_name, None)
-    elif run_phase == RunPhase.START:
-        _maid.start_pipelines.pop(task_name, None)
-    elif run_phase == RunPhase.END:
-        _maid.end_pipelines.pop(task_name, None)
-    elif run_phase == RunPhase.FINALLY:
-        _maid.finally_pipelines.pop(task_name, None)
-
-
 def _add_task(maid_name, pipeline, is_default, run_phase):
+    if not pipeline.name:
+        raise Exception('Pipeline names must not be empty.')
+
     _maid = get_maid(maid_name)
 
     if is_default:
@@ -121,6 +112,9 @@ class M:
         self.end_pipelines = dict()
         self.finally_pipelines = dict()
 
+    def get_pipeline(self, name):
+        return self.pipelines[name]
+
     def dry_run(self, pipeline_name='', verbose=False):
         r = '\n'.join(p.dry_run(verbose) for p in self.start_pipelines.values())
         r += '\n' + self._get_pipeline(pipeline_name).dry_run(verbose)
@@ -209,7 +203,8 @@ class A:
 
     def __init__(
             self,
-            name, # o
+            name='', # o
+            *,
             maid_name=DEFAULT_MAID_NAME, # o
             inputs=None, # o
             required_pipelines=None, # o
@@ -218,7 +213,7 @@ class A:
             cache=CacheType.NONE, # o
             run_phase=RunPhase.NORMAL, # o
             is_default=False, # o
-            independent_targets=False,
+            independent_targets_creator=None,
             script_stream=None, # o
             output_stream=None, # o
             delete_targets_on_error=True, #o
@@ -229,7 +224,10 @@ class A:
             ):
         self.name = name
         self.inputs = tuple(inputs) if inputs else tuple()
-        self.required_pipelines = tuple(required_pipelines) if required_pipelines else tuple()
+
+        rp = required_pipelines if required_pipelines else dict()
+        self.required_pipelines = {p: get_maid(maid_name).get_pipeline(p) for p in rp}
+
         self.required_files = tuple(required_files) if required_files else tuple()
         self.targets = tuple(targets) if targets else tuple()
         self._commands = []
@@ -242,12 +240,12 @@ class A:
         self._delete_targets_on_error = delete_targets_on_error
         self._output_stream = output_stream
         self._script_stream = script_stream
+        self._maid_name = maid_name
         self._is_default = is_default
-        self._independent_targets = independent_targets
-        self.maid_name = maid_name
-        self.run_phase = run_phase
+        self._independent_targets_creator = independent_targets_creator
 
-        _add_task(self.maid_name, self, self._is_default, run_phase)
+        if self.name:
+            _add_task(self._maid_name, self, self._is_default, run_phase)
 
     def __gt__(self, rhs):
         '''
@@ -316,7 +314,7 @@ class A:
         Return a string containing all steps that a call to `run`
         would execute.
         '''
-        f = lambda : '\n'.join(p.dry_run(verbose) for p in self.required_pipelines if p.name not in A._visited)
+        f = lambda : '\n'.join(p.dry_run(verbose) for p in self.required_pipelines.values() if p.name not in A._visited)
 
         # This goes before anything below it because `_should_run`
         # depends on the traversal's output.
@@ -354,7 +352,7 @@ class A:
 
     def _run_dependencies(self):
         error = None
-        for pipeline in self.required_pipelines:
+        for pipeline in self.required_pipelines.values():
             # Don't rerun pipelines that have already run.
             if pipeline.name in A._visited:
                 continue
@@ -427,6 +425,11 @@ class A:
         if not _write_to_file(outputs, self._outfile, self._mode):
             if self._output_stream:
                 self._output_stream.writelines(outputs)
+
+        if (f := maid.task_runner.is_any_target_not_found(self.name, self.targets)):
+            msg = 'Task `{task}` ran without error but did not create expected files: `{filename}` not found.'.format(task=self.name, filename=f)
+            raise maid.task_runner.MissingExpectedTargetsException(msg)
+
         _make_hashes(self._cache, self.targets, self.required_files)
 
     def _should_run(self):
@@ -464,7 +467,7 @@ class A:
                     lambda a: a, # This doesn't matter; never runs.
                     targets=p.targets,
                     )
-            for p in self.required_pipelines
+            for p in self.required_pipelines.values()
         }
         graph[self.name] = maid.tasks.Task(
                     self.name,
@@ -472,7 +475,7 @@ class A:
                     targets=self.targets,
                     required_files=self.required_files,
                     required_tasks=tuple(
-                        [p.name for p in self.required_pipelines]
+                        [p.name for p in self.required_pipelines.values()]
                         ),
                     )
         return graph
@@ -480,51 +483,40 @@ class A:
 
 def task(
         name,
-        inputs,
-        required_files,
-        targets,
-        cache,
-        script_stream,
-        independent_targets=False,
-        maid_name=DEFAULT_MAID_NAME,
-        run_phase=RunPhase.NORMAL,
+        inputs=None,
+        required_files=tuple(),
+        required_pipelines=tuple(),
+        targets=tuple(),
+        cache=CacheType.NONE,
+        output_stream=sys.stdout,
+        script_stream=sys.stderr,
+        independent_targets=None,
+        is_default=False,
         ):
     def _f(g):
-        def _g():
-            if independent_targets:
-                for filename in maid.tasks.get_filenames(targets):
-                    tmp_name = '_{}'.format(name)
-                    p = A(
-                            tmp_name,
-                            inputs=inputs,
-                            required_files=required_files,
-                            targets=[filename],
-                            cache=cache,
-                            script_stream=script_stream,
-                            )
-                    yield g(p)
-                    _remove_task(maid_name, tmp_name, run_phase)
-            else:
-                p = A(
-                        name,
-                        inputs=inputs,
-                        required_files=required_files,
-                        targets=targets,
-                        cache=cache,
-                        script_stream=script_stream,
-                        )
-                yield g(p)
-        return _g
+        p = A(
+                name,
+                inputs=inputs,
+                required_files=required_files,
+                targets=targets,
+                cache=cache,
+                is_default=is_default,
+                independent_targets_creator=g if independent_targets else None,
+                required_pipelines=required_pipelines,
+                output_stream=output_stream,
+                script_stream=script_stream,
+                )
+        g(p)
+        #return lambda: g(p)
     return _f
 
 @task(
     'p1',
     inputs=['lol\n', '.lol\n'],
     required_files=['requirements.txt'],
-    targets=['a.txt', 'b.txt'],
+    targets=['a.txt'],
     cache=CacheType.HASH,
     script_stream=sys.stdout,
-    independent_targets=True,
 )
 def h(a):
     a \
@@ -534,38 +526,19 @@ def h(a):
     | (lambda o: (oj.strip()+'m' for oj in o)) \
     | "tr 'm' '!'" \
     > a.targets[0]
-    print(a.targets)
-
-print(list(h()))
-print(list(h()))
-exit()
 
 
-p1 = A(
-        'p1',
-        inputs=['lol\n', '.lol\n'],
-        required_files=['requirements.txt'],
-        targets=['a.txt'],
-        cache=CacheType.HASH,
-        script_stream=sys.stdout,
-        )
-p1 = (
-        p1
-        | "sed 's/lol/md/'"
-        | "grep .md"
-        | (lambda o: (oj.strip()+'?' for oj in o))
-        | (lambda o: (oj.strip()+'m' for oj in o))
-        | "tr 'm' '!'"
-        > p1.targets[0]
-     )
-p2 = A(
-        'p2',
-        required_pipelines=[p1],
-        output_stream=sys.stdout,
-        script_stream=sys.stderr,
-        is_default=True,
-        ) \
-    | f"cat {p1.targets[0]}"
+@task(
+    'p2',
+    required_pipelines=['p1'],
+    output_stream=sys.stdout,
+    script_stream=sys.stderr,
+    is_default=True,
+)
+def h2(a):
+    a \
+    | f"cat {a.required_pipelines['p1'].targets[0]}"
 
 print(get_maid().dry_run(verbose=True), file=sys.stderr)
 sys.stdout.writelines(get_maid().run())
+exit()
