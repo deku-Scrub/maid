@@ -15,6 +15,19 @@ def get_maid(maid_name=DEFAULT_MAID_NAME):
     return maids.setdefault(maid_name, M(maid_name))
 
 
+def _remove_task(maid_name, task_name, run_phase):
+    _maid = get_maid(maid_name)
+
+    if run_phase == RunPhase.NORMAL:
+        _maid.pipelines.pop(task_name, None)
+    elif run_phase == RunPhase.START:
+        _maid.start_pipelines.pop(task_name, None)
+    elif run_phase == RunPhase.END:
+        _maid.end_pipelines.pop(task_name, None)
+    elif run_phase == RunPhase.FINALLY:
+        _maid.finally_pipelines.pop(task_name, None)
+
+
 def _add_task(maid_name, pipeline, is_default, run_phase):
     _maid = get_maid(maid_name)
 
@@ -229,11 +242,12 @@ class A:
         self._delete_targets_on_error = delete_targets_on_error
         self._output_stream = output_stream
         self._script_stream = script_stream
-        self._maid_name = maid_name
         self._is_default = is_default
         self._independent_targets = independent_targets
+        self.maid_name = maid_name
+        self.run_phase = run_phase
 
-        _add_task(self._maid_name, self, self._is_default, run_phase)
+        _add_task(self.maid_name, self, self._is_default, run_phase)
 
     def __gt__(self, rhs):
         '''
@@ -462,6 +476,69 @@ class A:
                         ),
                     )
         return graph
+
+
+def task(
+        name,
+        inputs,
+        required_files,
+        targets,
+        cache,
+        script_stream,
+        independent_targets=False,
+        maid_name=DEFAULT_MAID_NAME,
+        run_phase=RunPhase.NORMAL,
+        ):
+    def _f(g):
+        def _g():
+            if independent_targets:
+                for filename in maid.tasks.get_filenames(targets):
+                    tmp_name = '_{}'.format(name)
+                    p = A(
+                            tmp_name,
+                            inputs=inputs,
+                            required_files=required_files,
+                            targets=[filename],
+                            cache=cache,
+                            script_stream=script_stream,
+                            )
+                    yield g(p)
+                    _remove_task(maid_name, tmp_name, run_phase)
+            else:
+                p = A(
+                        name,
+                        inputs=inputs,
+                        required_files=required_files,
+                        targets=targets,
+                        cache=cache,
+                        script_stream=script_stream,
+                        )
+                yield g(p)
+        return _g
+    return _f
+
+@task(
+    'p1',
+    inputs=['lol\n', '.lol\n'],
+    required_files=['requirements.txt'],
+    targets=['a.txt', 'b.txt'],
+    cache=CacheType.HASH,
+    script_stream=sys.stdout,
+    independent_targets=True,
+)
+def h(a):
+    a \
+    | "sed 's/lol/md/'" \
+    | "grep .md" \
+    | (lambda o: (oj.strip()+'?' for oj in o)) \
+    | (lambda o: (oj.strip()+'m' for oj in o)) \
+    | "tr 'm' '!'" \
+    > a.targets[0]
+    print(a.targets)
+
+print(list(h()))
+print(list(h()))
+exit()
 
 
 p1 = A(
