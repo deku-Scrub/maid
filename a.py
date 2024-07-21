@@ -605,3 +605,14 @@ a = A(inputs=(j for j in range(100))) \
 # ```
 print(a.dry_run(True))
 print('pipeline output: {}'.format(list(a.run())))
+
+# example from https://github.com/pytoolz/toolz
+import collections
+stem = lambda x: [w.lower().rstrip(",.!:;'-\"").lstrip("'\"") for w in x]
+counter = collections.Counter()
+a = A(inputs=['this cat jumped over this other cat!']) \
+    | (lambda x: map(str.split, x)) \
+    | (lambda x: map(stem, x)) \
+    | (lambda x: (counter.update(xj) for xj in x))
+_ = list(a.run())
+print(counter)
