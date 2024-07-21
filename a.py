@@ -92,7 +92,7 @@ class Pipeline:
 
         # Write to first command.
         for cur_input in inputs:
-            processes[0].stdin.write(cur_input)
+            processes[0].stdin.write(str(cur_input) + '\n')
         processes[0].stdin.flush()
         processes[0].stdin.close()
 
@@ -588,6 +588,20 @@ def h(a):
 def h2(a):
     a | f"cat {a.required_pipelines['p1'].targets[0]}"
 
-print(get_maid().dry_run(verbose=True), file=sys.stderr)
-sys.stdout.writelines(get_maid().run())
-exit()
+#print(get_maid().dry_run(verbose=True), file=sys.stderr)
+#sys.stdout.writelines(get_maid().run())
+
+a = A(inputs=(j for j in range(100))) \
+    | (lambda x: (xj % 3 == 0 for xj in x)) \
+    | (lambda x: filter(None, x)) \
+    | 'parallel {args} "echo paraLOL; echo {{}}"'.format(args='--bar') \
+    | 'grep -i lol' \
+    | (lambda x: map(len, x)) \
+    | 'wc -l'
+# can probably use joblib as a step to parallelize python code in
+# the same way gnu parallel can be a step to paralellize shell code:
+# ```
+#  | (lambda x: joblib.Parallel()(joblib.delayed(f)(xj) for xj in x))
+# ```
+print(a.dry_run(True))
+print('pipeline output: {}'.format(list(a.run())))
