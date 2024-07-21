@@ -74,6 +74,14 @@ def _throw_script_error(task, err_info, filenames):
     raise Exception('idk') # TODO: is this function necessary?
 
 
+def is_any_target_not_found(task, filenames):
+    is_file_missing = False
+    for f in filenames:
+        if not os.path.exists(f):
+            return f
+    return ''
+
+
 def _is_any_target_not_found(task, filenames):
     is_file_missing = False
     for filename in filenames:
