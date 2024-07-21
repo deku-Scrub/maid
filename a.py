@@ -242,10 +242,30 @@ class A:
         self._script_stream = script_stream
         self._maid_name = maid_name
         self._is_default = is_default
-        self._independent_targets_creator = independent_targets_creator
 
         if self.name:
             _add_task(self._maid_name, self, self._is_default, run_phase)
+
+        self._get_independent_task = None
+        if independent_targets_creator:
+            def f(target):
+                a = A(
+                    name='',
+                    inputs=inputs,
+                    required_files=required_files,
+                    targets=[target],
+                    cache=cache,
+                    independent_targets_creator=None,
+                    script_stream=script_stream,
+                    output_stream=output_stream,
+                    delete_targets_on_error=delete_targets_on_error,
+                    dont_run_if_all_targets_exist=dont_run_if_all_targets_exist,
+                    finish_depth_on_failure=finish_depth_on_failure,
+                    update_requested=update_requested,
+                )
+                independent_targets_creator(a)
+                return a
+            self._get_independent_task = f
 
     def __gt__(self, rhs):
         '''
@@ -396,10 +416,35 @@ class A:
         Logic for running the pipeline.
         '''
         inputs = self.inputs
-        for command in self._commands:
-            self._print_scripts(command)
-            inputs = command(inputs)
-        return inputs # ie, outputs.
+        # TODO: When independent targets is enabled, the task
+        # probably should end in `>`.  Doesn't make sense to have
+        # each produce non-empty output.  Which task is the one
+        # to use as the aggregate output?  Should they be zipped?
+        # Can't guarantee that they're all the same length.  Too
+        # many problems.  Either end in `>` or ignore output.
+        # TODO: The independent targets functionality is composed
+        # of spaghetti code; tight coupling to external (and internal)
+        # code that it shouldn't be coupled with.  This must be fixed.
+        if self._get_independent_task:
+            # TODO: Error handling logic is the same as in
+            # `_run_dependencies`.  This should be refactored
+            # similar to `_wrap_visited`.
+            error = None
+            for f in maid.tasks.get_filenames(self.targets):
+                try:
+                    self._get_independent_task(f).run()
+                except Exception as err:
+                    error = error if error else err
+                    if not self._finish_depth_on_failure:
+                        raise error
+            if error:
+                raise error
+            return tuple()
+        else:
+            for command in self._commands:
+                self._print_scripts(command)
+                inputs = command(inputs)
+            return inputs # ie, outputs.
 
     def _run(self):
         '''
@@ -409,7 +454,11 @@ class A:
             if (r := self._prerun()) and r[0]:
                 return r[1]
             outputs = self._main_run()
-            self._postrun(outputs)
+            # The post-run step has already been done by the
+            # independent tasks.  Doing it again would cause
+            # errors, particularly overwriting files.
+            if not self._get_independent_task:
+                self._postrun(outputs)
             return outputs
         except Exception as err:
             msg = 'Error running pipeline `{}`: {}'.format(self.name, err)
@@ -490,7 +539,7 @@ def task(
         cache=CacheType.NONE,
         output_stream=sys.stdout,
         script_stream=sys.stderr,
-        independent_targets=None,
+        independent_targets=False,
         is_default=False,
         ):
     def _f(g):
@@ -506,17 +555,18 @@ def task(
                 output_stream=output_stream,
                 script_stream=script_stream,
                 )
+        # Let `g` immediately create commands for `p`.
         g(p)
-        #return lambda: g(p)
     return _f
 
 @task(
     'p1',
     inputs=['lol\n', '.lol\n'],
     required_files=['requirements.txt'],
-    targets=['a.txt'],
+    targets=['a.txt', 'b.txt'],
     cache=CacheType.HASH,
     script_stream=sys.stdout,
+    independent_targets=True,
 )
 def h(a):
     a \
@@ -536,8 +586,7 @@ def h(a):
     is_default=True,
 )
 def h2(a):
-    a \
-    | f"cat {a.required_pipelines['p1'].targets[0]}"
+    a | f"cat {a.required_pipelines['p1'].targets[0]}"
 
 print(get_maid().dry_run(verbose=True), file=sys.stderr)
 sys.stdout.writelines(get_maid().run())
