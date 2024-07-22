@@ -249,6 +249,10 @@ class A:
         self._get_independent_task = None
         if independent_targets_creator:
             def f(target):
+                # Makes several assumptions:
+                #   * the empty `name` prevents querying maid.
+                #   * the lack of `required_pipelines` skips running
+                #     of dependencies.
                 a = A(
                     name='',
                     inputs=inputs,
@@ -370,15 +374,11 @@ class A:
         '''
         return self._wrap_visited(self._run)
 
-    def _run_dependencies(self):
+    def _throw_if_any_fail(self, f, iterable):
         error = None
-        for pipeline in self.required_pipelines.values():
-            # Don't rerun pipelines that have already run.
-            if pipeline.name in A._visited:
-                continue
-
+        for val in iterable:
             try:
-                pipeline.run()
+                f(val)
             except Exception as err:
                 # Save first error and continue if so specified.
                 error = error if error else err
@@ -388,6 +388,15 @@ class A:
         # Raise error, if any, once the depth is complete.
         if error:
             raise error
+
+    def _run_dependencies(self):
+        # Checking that `p.name not in A._visited` prevents reruning
+        # pipelines that have already run.
+        self._throw_if_any_fail(
+                lambda p: p.run(),
+                (p for p in self.required_pipelines.values()
+                 if p.name not in A._visited
+                 ))
 
     def _stop_early(self):
         '''
@@ -422,23 +431,11 @@ class A:
         # to use as the aggregate output?  Should they be zipped?
         # Can't guarantee that they're all the same length.  Too
         # many problems.  Either end in `>` or ignore output.
-        # TODO: The independent targets functionality is composed
-        # of spaghetti code; tight coupling to external (and internal)
-        # code that it shouldn't be coupled with.  This must be fixed.
         if self._get_independent_task:
-            # TODO: Error handling logic is the same as in
-            # `_run_dependencies`.  This should be refactored
-            # similar to `_wrap_visited`.
-            error = None
-            for f in maid.tasks.get_filenames(self.targets):
-                try:
-                    self._get_independent_task(f).run()
-                except Exception as err:
-                    error = error if error else err
-                    if not self._finish_depth_on_failure:
-                        raise error
-            if error:
-                raise error
+            self._throw_if_any_fail(
+                    lambda f: self._get_independent_task(f).run(),
+                    maid.tasks.get_filenames(self.targets),
+                    )
             return tuple()
         else:
             for command in self._commands:
@@ -588,31 +585,31 @@ def h(a):
 def h2(a):
     a | f"cat {a.required_pipelines['p1'].targets[0]}"
 
-#print(get_maid().dry_run(verbose=True), file=sys.stderr)
-#sys.stdout.writelines(get_maid().run())
+print(get_maid().dry_run(verbose=True), file=sys.stderr)
+sys.stdout.writelines(get_maid().run())
 
-a = A(inputs=(j for j in range(100))) \
-    | (lambda x: (xj % 3 == 0 for xj in x)) \
-    | (lambda x: filter(None, x)) \
-    | 'parallel {args} "echo paraLOL; echo {{}}"'.format(args='--bar') \
-    | 'grep -i lol' \
-    | (lambda x: map(len, x)) \
-    | 'wc -l'
-# can probably use joblib as a step to parallelize python code in
-# the same way gnu parallel can be a step to paralellize shell code:
-# ```
-#  | (lambda x: joblib.Parallel()(joblib.delayed(f)(xj) for xj in x))
-# ```
-print(a.dry_run(True))
-print('pipeline output: {}'.format(list(a.run())))
-
-# example from https://github.com/pytoolz/toolz
-import collections
-stem = lambda x: [w.lower().rstrip(",.!:;'-\"").lstrip("'\"") for w in x]
-counter = collections.Counter()
-a = A(inputs=['this cat jumped over this other cat!']) \
-    | (lambda x: map(str.split, x)) \
-    | (lambda x: map(stem, x)) \
-    | (lambda x: (counter.update(xj) for xj in x))
-_ = list(a.run())
-print(counter)
+#a = A(inputs=(j for j in range(100))) \
+    #| (lambda x: (xj % 3 == 0 for xj in x)) \
+    #| (lambda x: filter(None, x)) \
+    #| 'parallel {args} "echo paraLOL; echo {{}}"'.format(args='--bar') \
+    #| 'grep -i lol' \
+    #| (lambda x: map(len, x)) \
+    #| 'wc -l'
+## can probably use joblib as a step to parallelize python code in
+## the same way gnu parallel can be a step to paralellize shell code:
+## ```
+##  | (lambda x: joblib.Parallel()(joblib.delayed(f)(xj) for xj in x))
+## ```
+#print(a.dry_run(True))
+#print('pipeline output: {}'.format(list(a.run())))
+#
+## example from https://github.com/pytoolz/toolz
+#import collections
+#stem = lambda x: [w.lower().rstrip(",.!:;'-\"").lstrip("'\"") for w in x]
+#counter = collections.Counter()
+#a = A(inputs=['this cat jumped over this other cat!']) \
+    #| (lambda x: map(str.split, x)) \
+    #| (lambda x: map(stem, x)) \
+    #| (lambda x: (counter.update(xj) for xj in x))
+#_ = list(a.run())
+#print(counter)
