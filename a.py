@@ -19,26 +19,30 @@ def get_maid(maid_name=DEFAULT_MAID_NAME):
     return maids.setdefault(maid_name, M(maid_name))
 
 
+def _validate_default_task(task):
+    if not task.is_default:
+        return False
+
+    if task.run_phase != RunPhase.NORMAL:
+        raise maid.exceptions.DefaultTaskRunPhaseException(task)
+    if get_maid(task.maid_name).default_task:
+        raise maid.exceptions.DuplicateTaskException(task)
+
+    return True
+
+
 def _set_default_task(task):
     '''
     '''
-    if not task.is_default:
-        return
-
-    _maid = get_maid(task.maid_name)
-    if task.run_phase != RunPhase.NORMAL:
-        raise maid.exceptions.DefaultTaskRunPhaseException(task)
-    if _maid.default_task:
-        raise maid.exceptions.DuplicateTaskException(task)
-
-    _maid.default_task = task.name
+    if _validate_default_task(task):
+        get_maid(task.maid_name).default_task = task.name
 
 
 def _validate_task(task):
     _maid = get_maid(task.maid_name)
     if not task.name:
         raise maid.exceptions.InvalidTaskNameException()
-    if task.name in _maid.pipelines:
+    if task.name in _maid.tasks:
         raise maid.exceptions.DuplicateTaskException(task)
 
 
@@ -49,13 +53,13 @@ def _add_task(task):
     _maid = get_maid(task.maid_name)
 
     if task.run_phase == RunPhase.NORMAL:
-        _maid.pipelines[task.name] = task
+        _maid.tasks[task.name] = task
     elif task.run_phase == RunPhase.START:
-        _maid.start_pipelines[task.name] = task
+        _maid.start_tasks[task.name] = task
     elif task.run_phase == RunPhase.END:
-        _maid.end_pipelines[task.name] = task
+        _maid.end_tasks[task.name] = task
     elif task.run_phase == RunPhase.FINALLY:
-        _maid.finally_pipelines[task.name] = task
+        _maid.finally_tasks[task.name] = task
 
 
 class Pipeline:
@@ -108,52 +112,50 @@ class M:
     def __init__(self, name):
         self.name = name
         self.default_task = ''
-        self.pipelines = dict()
-        self.start_pipelines = dict()
-        self.end_pipelines = dict()
-        self.finally_pipelines = dict()
+        self.tasks = dict()
+        self.start_tasks = dict()
+        self.end_tasks = dict()
+        self.finally_tasks = dict()
 
-    def get_pipeline(self, name):
-        return self.pipelines[name]
+    def get_task(self, name):
+        return self.tasks[name]
 
-    def dry_run(self, pipeline_name='', verbose=False):
-        r = '\n'.join(p.dry_run(verbose) for p in self.start_pipelines.values())
-        r += '\n' + self._get_pipeline(pipeline_name).dry_run(verbose)
+    def dry_run(self, task_name='', verbose=False):
+        r = '\n'.join(p.dry_run(verbose) for p in self.start_tasks.values())
+        r += '\n' + self._get_task(task_name).dry_run(verbose)
 
-        re = '\n'.join(p.dry_run(verbose) for p in self.end_pipelines.values())
+        re = '\n'.join(p.dry_run(verbose) for p in self.end_tasks.values())
         if re:
             r += '\n#### These run only if the previous run without error.'
             r += '\n' + re
 
-        rf = '\n'.join(p.dry_run(verbose) for p in self.finally_pipelines.values())
+        rf = '\n'.join(p.dry_run(verbose) for p in self.finally_tasks.values())
         if rf:
             r += '\n#### These run regardless of any error.'
             r += '\n' + rf
 
         return r
 
-    def run(self, pipeline_name=''):
-        outputs = tuple()
-        main_pipeline = self._get_pipeline(pipeline_name)
+    def _run(self, tasks, capture_outputs=True):
+        outputs = map(A.run, tasks)
+        empty_iter = filter(lambda _: False, outputs)
+        return outputs if capture_outputs else list(empty_iter)
+
+    def run(self, task_name=''):
         try:
-            for _, pipeline in self.start_pipelines:
-                pipeline.run()
-            outputs = main_pipeline.run()
-            for _, pipeline in self.end_pipelines:
-                pipeline.run()
+            _ = self._run(self.start_tasks.values(), capture_outputs=False)
+            return next(self._run([self._get_task(task_name)]))
         except Exception as err:
             raise err
         finally:
-            for _, pipeline in self.finally_pipelines:
-                pipeline.run()
-        return outputs
+            _ = self._run(self.finally_tasks.values(), capture_outputs=False)
 
-    def _get_pipeline(self, pipeline_name):
-        if pipeline_name in self.pipelines:
-            return self.pipelines[pipeline_name]
+    def _get_task(self, task_name):
+        if task_name in self.tasks:
+            return self.tasks[task_name]
         if self.default_task:
-            return self.pipelines[self.default_task]
-        raise Exception('Unknown pipeline.  Maid `{}` has no pipeline named `{}`'.format(self.name, pipeline_name))
+            return self.tasks[self.default_task]
+        raise Exception('Unknown pipeline.  Maid `{}` has no pipeline named `{}`'.format(self.name, task_name))
 
 
 def _make_hashes(cache, *files):
@@ -227,7 +229,7 @@ class A:
         self.inputs = tuple(inputs) if inputs else tuple()
 
         rp = required_pipelines if required_pipelines else dict()
-        self.required_pipelines = {p: get_maid(maid_name).get_pipeline(p) for p in rp}
+        self.required_pipelines = {p: get_maid(maid_name).get_task(p) for p in rp}
 
         self.required_files = tuple(required_files) if required_files else tuple()
         self.targets = tuple(targets) if targets else tuple()
