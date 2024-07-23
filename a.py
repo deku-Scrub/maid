@@ -303,6 +303,10 @@ class A:
             self._commands[-1].append(rhs)
         elif callable(rhs):
             self._commands.append(rhs)
+        elif isinstance(rhs, tuple):
+            self._commands.append(rhs)
+        else:
+            raise Exception('Unknown command type used with `|`: {}.  Only `str`, `callable`, and `tuple` instances are supported.'.format(type(rhs)))
         return self
 
     def __str__(self):
@@ -444,6 +448,8 @@ class A:
                     inputs = command(inputs)
                 elif callable(command):
                     inputs = map(command, inputs)
+                elif isinstance(command, tuple):
+                    inputs = command[0](*command[1:], inputs)
             return inputs # ie, outputs.
 
     def _run(self):
@@ -577,7 +583,6 @@ def h(a):
     | "tr 'm' '!'" \
     > a.targets[0]
 
-
 @task(
     'p2',
     required_pipelines=['p1'],
@@ -591,24 +596,25 @@ def h2(a):
 print(get_maid().dry_run(verbose=True), file=sys.stderr)
 sys.stdout.writelines(get_maid().run())
 
-#a = A(inputs=(j for j in range(100))) \
-    #| (lambda x: (xj % 3 == 0 for xj in x)) \
-    #| (lambda x: filter(None, x)) \
-    #| 'parallel {args} "echo paraLOL; echo {{}}"'.format(args='--bar') \
-    #| 'grep -i lol' \
-    #| (lambda x: map(len, x)) \
-    #| 'wc -l'
-## can probably use joblib as a step to parallelize python code in
-## the same way gnu parallel can be a step to paralellize shell code:
-## ```
-##  | (lambda x: joblib.Parallel()(joblib.delayed(f)(xj) for xj in x))
-## ```
-#print(a.dry_run(True))
-#print('pipeline output: {}'.format(list(a.run())))
-#
-## example from https://github.com/pytoolz/toolz
+a = A(inputs=(j for j in range(100))) \
+    | (filter, lambda x: x % 3 == 0) \
+    | 'parallel {args} "echo paraLOL; echo {{}}"'.format(args='--bar') \
+    | 'grep -i lol' \
+    | len \
+    | 'wc -l'
+# can probably use joblib as a step to parallelize python code in
+# the same way gnu parallel can be a step to paralellize shell code:
+# ```
+#  | (lambda x: joblib.Parallel()(joblib.delayed(f)(xj) for xj in x))
+# ```
+print(a.dry_run(True))
+print('pipeline output: {}'.format(list(a.run())))
+
+# example from https://github.com/pytoolz/toolz
 import collections
+import itertools
 stem = lambda x: [w.lower().rstrip(",.!:;'-\"").lstrip("'\"") for w in x]
+flatten = lambda x: (col for row in x for col in row)
 counter = collections.Counter()
 a = A(inputs=['this cat jumped over this other cat!']) \
     | str.split \
