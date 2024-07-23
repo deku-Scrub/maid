@@ -180,10 +180,8 @@ def update_files(filenames):
 
 
 def _any_files_missing(filenames, must_exist=True):
-    for f in maid.tasks.get_filenames(filenames, must_exist=must_exist):
-        if not os.path.exists(f):
-            return f
-    return ''
+    filenames = maid.tasks.get_filenames(filenames, must_exist=must_exist)
+    return next((f for f in filenames if not os.path.exists(f)), '')
 
 
 class RunPhase(enum.Enum):
