@@ -424,7 +424,6 @@ class A:
         '''
         Logic for running the pipeline.
         '''
-        inputs = self.inputs
         # TODO: When independent targets is enabled, the task
         # probably should end in `>`.  Doesn't make sense to have
         # each produce non-empty output.  Which task is the one
@@ -438,9 +437,13 @@ class A:
                     )
             return tuple()
         else:
+            inputs = self.inputs
             for command in self._commands:
                 self._print_scripts(command)
-                inputs = command(inputs)
+                if isinstance(command, Pipeline):
+                    inputs = command(inputs)
+                elif callable(command):
+                    inputs = map(command, inputs)
             return inputs # ie, outputs.
 
     def _run(self):
@@ -569,8 +572,8 @@ def h(a):
     a \
     | "sed 's/lol/md/'" \
     | "grep .md" \
-    | (lambda o: (oj.strip()+'?' for oj in o)) \
-    | (lambda o: (oj.strip()+'m' for oj in o)) \
+    | (lambda x: x.strip()+'?') \
+    | (lambda x: x.strip()+'m') \
     | "tr 'm' '!'" \
     > a.targets[0]
 
@@ -604,12 +607,12 @@ sys.stdout.writelines(get_maid().run())
 #print('pipeline output: {}'.format(list(a.run())))
 #
 ## example from https://github.com/pytoolz/toolz
-#import collections
-#stem = lambda x: [w.lower().rstrip(",.!:;'-\"").lstrip("'\"") for w in x]
-#counter = collections.Counter()
-#a = A(inputs=['this cat jumped over this other cat!']) \
-    #| (lambda x: map(str.split, x)) \
-    #| (lambda x: map(stem, x)) \
-    #| (lambda x: (counter.update(xj) for xj in x))
-#_ = list(a.run())
-#print(counter)
+import collections
+stem = lambda x: [w.lower().rstrip(",.!:;'-\"").lstrip("'\"") for w in x]
+counter = collections.Counter()
+a = A(inputs=['this cat jumped over this other cat!']) \
+    | str.split \
+    | stem \
+    | counter.update
+_ = list(a.run())
+print(counter)
