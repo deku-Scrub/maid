@@ -3,6 +3,7 @@ import os
 import sys
 import subprocess
 
+import maid.exceptions
 import maid.tasks
 import maid.task_runner
 import maid.monitor.hash
@@ -13,48 +14,48 @@ maids = dict()
 
 
 def get_maid(maid_name=DEFAULT_MAID_NAME):
+    if not maid_name:
+        raise maid.exceptions.MaidNameException()
     return maids.setdefault(maid_name, M(maid_name))
 
 
-def _add_task(maid_name, pipeline, is_default, run_phase):
-    if not pipeline.name:
-        raise Exception('Pipeline names must not be empty.')
+def _set_default_task(task):
+    '''
+    '''
+    if not task.is_default:
+        return
 
-    _maid = get_maid(maid_name)
+    _maid = get_maid(task.maid_name)
+    if task.run_phase != RunPhase.NORMAL:
+        raise maid.exceptions.DefaultTaskRunPhaseException(task)
+    if _maid.default_task:
+        raise maid.exceptions.DuplicateTaskException(task)
 
-    if is_default:
-        if run_phase != RunPhase.NORMAL:
-            raise Exception(
-                    'Only pipelines in the `NORMAL` run phase can be a default; was given `{}` for pipeline `{}`.'.format(
-                        run_phase,
-                        pipeline.name,
-                        )
-                    )
-        if _maid.default_pipeline:
-            raise Exception(
-                    'Maid `{}` already has default pipeline `{}`.'.format(
-                        maid_name,
-                        _maid.default_pipeline,
-                        )
-                    )
-        _maid.default_pipeline = pipeline.name
+    _maid.default_task = task.name
 
-    if pipeline.name in _maid.pipelines:
-        raise Exception(
-                'Maid `{}` already has pipeline named `{}`.'.format(
-                    maid_name,
-                    pipeline.name,
-                    )
-                )
 
-    if run_phase == RunPhase.NORMAL:
-        _maid.pipelines[pipeline.name] = pipeline
-    elif run_phase == RunPhase.START:
-        _maid.start_pipelines[pipeline.name] = pipeline
-    elif run_phase == RunPhase.END:
-        _maid.end_pipelines[pipeline.name] = pipeline
-    elif run_phase == RunPhase.FINALLY:
-        _maid.finally_pipelines[pipeline.name] = pipeline
+def _validate_task(task):
+    _maid = get_maid(task.maid_name)
+    if not task.name:
+        raise maid.exceptions.InvalidTaskNameException()
+    if task.name in _maid.pipelines:
+        raise maid.exceptions.DuplicateTaskException(task)
+
+
+def _add_task(task):
+    _validate_task(task)
+    _set_default_task(task)
+
+    _maid = get_maid(task.maid_name)
+
+    if task.run_phase == RunPhase.NORMAL:
+        _maid.pipelines[task.name] = task
+    elif task.run_phase == RunPhase.START:
+        _maid.start_pipelines[task.name] = task
+    elif task.run_phase == RunPhase.END:
+        _maid.end_pipelines[task.name] = task
+    elif task.run_phase == RunPhase.FINALLY:
+        _maid.finally_pipelines[task.name] = task
 
 
 class Pipeline:
@@ -106,7 +107,7 @@ class M:
 
     def __init__(self, name):
         self.name = name
-        self.default_pipeline = ''
+        self.default_task = ''
         self.pipelines = dict()
         self.start_pipelines = dict()
         self.end_pipelines = dict()
@@ -150,8 +151,8 @@ class M:
     def _get_pipeline(self, pipeline_name):
         if pipeline_name in self.pipelines:
             return self.pipelines[pipeline_name]
-        if self.default_pipeline:
-            return self.pipelines[self.default_pipeline]
+        if self.default_task:
+            return self.pipelines[self.default_task]
         raise Exception('Unknown pipeline.  Maid `{}` has no pipeline named `{}`'.format(self.name, pipeline_name))
 
 
@@ -240,11 +241,12 @@ class A:
         self._delete_targets_on_error = delete_targets_on_error
         self._output_stream = output_stream
         self._script_stream = script_stream
-        self._maid_name = maid_name
-        self._is_default = is_default
+        self.maid_name = maid_name
+        self.is_default = is_default
+        self.run_phase = run_phase
 
         if self.name:
-            _add_task(self._maid_name, self, self._is_default, run_phase)
+            _add_task(self)
 
         self._get_independent_task = None
         if independent_targets_creator:
