@@ -477,6 +477,11 @@ class A:
         '''
         Run functions that require the pipeline to have finished.
         '''
+        if self._outfile:
+            self._print_scripts('{} {}\n'.format(
+                        '>' if self._mode.startswith('w') else '>>',
+                        self._outfile,
+                        ))
         if not _write_to_file(outputs, self._outfile, self._mode):
             if self._output_stream:
                 self._output_stream.writelines(outputs)
@@ -605,7 +610,7 @@ a = A(inputs=(j for j in range(100))) \
 # can probably use joblib as a step to parallelize python code in
 # the same way gnu parallel can be a step to paralellize shell code:
 # ```
-#  | (lambda x: joblib.Parallel()(joblib.delayed(f)(xj) for xj in x))
+#  | (lambda x: joblib.Parallel()(joblib.delayed(f)(xj) for xj in x),)
 # ```
 print(a.dry_run(True))
 print('pipeline output: {}'.format(list(a.run())))
