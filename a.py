@@ -170,8 +170,7 @@ def _write_to_file(lines, filename, mode):
         return False
 
     with open(filename, mode=mode) as fos:
-        for line in lines:
-            fos.write(line)
+        fos.writelines(lines)
     return True
 
 
