@@ -1,3 +1,4 @@
+import functools
 import enum
 import os
 import sys
@@ -66,17 +67,21 @@ class Pipeline:
     def __str__(self):
         return '\n'.join(self._commands)
 
+    def _pipe_process_to_command(self, process, cmd):
+        return process + [self._make_process(cmd, process[-1].stdout)]
+
     def __call__(self, inputs=None):
         inputs = inputs if inputs else tuple()
 
         # Hook up command outputs to inputs.
-        processes = [self._make_process(self._commands[0], subprocess.PIPE)]
-        for cmd in self._commands[1:]:
-            processes.append(self._make_process(cmd, processes[-1].stdout))
+        processes = functools.reduce(
+                self._pipe_process_to_command,
+                self._commands[1:],
+                [self._make_process(self._commands[0], subprocess.PIPE)],
+                )
 
         # Write to first command.
-        for cur_input in inputs:
-            processes[0].stdin.write(str(cur_input) + '\n')
+        processes[0].stdin.writelines(str(i) + '\n' for i in inputs)
         processes[0].stdin.flush()
         processes[0].stdin.close()
 
