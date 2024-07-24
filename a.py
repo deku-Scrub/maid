@@ -1,4 +1,5 @@
 import functools
+import itertools
 import enum
 import os
 import sys
@@ -105,20 +106,13 @@ class M:
         return self.tasks[name]
 
     def dry_run(self, task_name='', verbose=False):
-        r = '\n'.join(p.dry_run(verbose) for p in self.start_tasks.values())
-        r += '\n' + self._get_task(task_name).dry_run(verbose)
-
-        re = '\n'.join(p.dry_run(verbose) for p in self.end_tasks.values())
-        if re:
-            r += '\n#### These run only if the previous run without error.'
-            r += '\n' + re
-
-        rf = '\n'.join(p.dry_run(verbose) for p in self.finally_tasks.values())
-        if rf:
-            r += '\n#### These run regardless of any error.'
-            r += '\n' + rf
-
-        return r
+        tasks = itertools.chain(
+                self.start_tasks.values(),
+                (self._get_task(task_name),),
+                self.end_tasks.values(),
+                self.finally_tasks.values(),
+                )
+        return '\n'.join(map(lambda t: t.dry_run(verbose), tasks))
 
     def _run(self, tasks, capture_outputs=True):
         outputs = map(A.run, tasks)
