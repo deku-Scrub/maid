@@ -19,47 +19,26 @@ def get_maid(maid_name=DEFAULT_MAID_NAME):
     return maids.setdefault(maid_name, M(maid_name))
 
 
-def _validate_default_task(task):
-    if not task.is_default:
-        return False
+def _add_task(task):
+    _maid = get_maid(task.maid_name)
 
-    if task.run_phase != RunPhase.NORMAL:
-        raise maid.exceptions.DefaultTaskRunPhaseException(task)
-    if get_maid(task.maid_name).default_task:
-        raise maid.exceptions.DuplicateTaskException(task)
+    match task:
+        case A(name=x) if not x:
+            return False
+        case A(is_default=True):
+            _maid.default_task = task.name
+
+    match task.run_phase:
+        case RunPhase.NORMAL:
+            _maid.tasks[task.name] = task
+        case RunPhase.START:
+            _maid.start_tasks[task.name] = task
+        case RunPhase.END:
+            _maid.end_tasks[task.name] = task
+        case RunPhase.FINALLY:
+            _maid.finally_tasks[task.name] = task
 
     return True
-
-
-def _set_default_task(task):
-    '''
-    '''
-    if _validate_default_task(task):
-        get_maid(task.maid_name).default_task = task.name
-
-
-def _validate_task(task):
-    _maid = get_maid(task.maid_name)
-    if not task.name:
-        raise maid.exceptions.InvalidTaskNameException()
-    if task.name in _maid.tasks:
-        raise maid.exceptions.DuplicateTaskException(task)
-
-
-def _add_task(task):
-    _validate_task(task)
-    _set_default_task(task)
-
-    _maid = get_maid(task.maid_name)
-
-    if task.run_phase == RunPhase.NORMAL:
-        _maid.tasks[task.name] = task
-    elif task.run_phase == RunPhase.START:
-        _maid.start_tasks[task.name] = task
-    elif task.run_phase == RunPhase.END:
-        _maid.end_tasks[task.name] = task
-    elif task.run_phase == RunPhase.FINALLY:
-        _maid.finally_tasks[task.name] = task
 
 
 class Pipeline:
@@ -205,14 +184,16 @@ class A:
             self,
             name='', # o
             *,
+            # Maid exclusive.
             maid_name=DEFAULT_MAID_NAME, # o
+            run_phase=RunPhase.NORMAL, # o
+            is_default=False, # o
+            # Task exclusive.
             inputs=None, # o
-            required_pipelines=None, # o
+            required_tasks=None, # o
             required_files=None, # o
             targets=None, # o
             cache=CacheType.NONE, # o
-            run_phase=RunPhase.NORMAL, # o
-            is_default=False, # o
             independent_targets_creator=None,
             script_stream=None, # o
             output_stream=None, # o
@@ -225,8 +206,8 @@ class A:
         self.name = name
         self.inputs = tuple(inputs) if inputs else tuple()
 
-        rp = required_pipelines if required_pipelines else dict()
-        self.required_pipelines = {p: get_maid(maid_name).get_task(p) for p in rp}
+        rp = required_tasks if required_tasks else dict()
+        self.required_tasks = {p: get_maid(maid_name).get_task(p) for p in rp}
 
         self.required_files = tuple(required_files) if required_files else tuple()
         self.targets = tuple(targets) if targets else tuple()
@@ -244,15 +225,12 @@ class A:
         self.is_default = is_default
         self.run_phase = run_phase
 
-        if self.name:
-            _add_task(self)
-
         self._get_independent_task = None
         if independent_targets_creator:
             def f(target):
                 # Makes several assumptions:
                 #   * the empty `name` prevents querying maid.
-                #   * the lack of `required_pipelines` skips running
+                #   * the lack of `required_tasks` skips running
                 #     of dependencies.
                 a = A(
                     name='',
@@ -271,6 +249,20 @@ class A:
                 independent_targets_creator(a)
                 return a
             self._get_independent_task = f
+
+        self._validate()
+        _ = _add_task(self)
+
+    def _validate(self):
+        match self:
+            case A(is_default=True, name=x) if not x:
+                raise maid.exceptions.InvalidTaskNameException()
+            case A(is_default=True, run_phase=x) if x != RunPhase.NORMAL:
+                raise maid.exceptions.DefaultTaskRunPhaseException(self)
+            case A(is_default=True) if get_maid(self.maid_name).default_task:
+                raise maid.exceptions.DuplicateTaskException(self)
+            case A(name=x) if x and (x in get_maid(self.maid_name).tasks):
+                raise maid.exceptions.DuplicateTaskException(self)
 
     def __gt__(self, rhs):
         '''
@@ -343,7 +335,7 @@ class A:
         Return a string containing all steps that a call to `run`
         would execute.
         '''
-        f = lambda : '\n'.join(p.dry_run(verbose) for p in self.required_pipelines.values() if p.name not in A._visited)
+        f = lambda : '\n'.join(p.dry_run(verbose) for p in self.required_tasks.values() if p.name not in A._visited)
 
         # This goes before anything below it because `_should_run`
         # depends on the traversal's output.
@@ -399,7 +391,7 @@ class A:
         # pipelines that have already run.
         self._throw_if_any_fail(
                 lambda p: p.run(),
-                (p for p in self.required_pipelines.values()
+                (p for p in self.required_tasks.values()
                  if p.name not in A._visited
                  ))
 
@@ -528,7 +520,7 @@ class A:
                     lambda a: a, # This doesn't matter; never runs.
                     targets=p.targets,
                     )
-            for p in self.required_pipelines.values()
+            for p in self.required_tasks.values()
         }
         graph[self.name] = maid.tasks.Task(
                     self.name,
@@ -536,7 +528,7 @@ class A:
                     targets=self.targets,
                     required_files=self.required_files,
                     required_tasks=tuple(
-                        [p.name for p in self.required_pipelines.values()]
+                        [p.name for p in self.required_tasks.values()]
                         ),
                     )
         return graph
@@ -546,7 +538,7 @@ def task(
         name,
         inputs=None,
         required_files=tuple(),
-        required_pipelines=tuple(),
+        required_tasks=tuple(),
         targets=tuple(),
         cache=CacheType.NONE,
         output_stream=sys.stdout,
@@ -563,7 +555,7 @@ def task(
                 cache=cache,
                 is_default=is_default,
                 independent_targets_creator=g if independent_targets else None,
-                required_pipelines=required_pipelines,
+                required_tasks=required_tasks,
                 output_stream=output_stream,
                 script_stream=script_stream,
                 )
@@ -591,13 +583,13 @@ def h(a):
 
 @task(
     'p2',
-    required_pipelines=['p1'],
+    required_tasks=['p1'],
     output_stream=sys.stdout,
     script_stream=sys.stderr,
     is_default=True,
 )
 def h2(a):
-    a | f"cat {a.required_pipelines['p1'].targets[0]}"
+    a | f"cat {a.required_tasks['p1'].targets[0]}"
 
 print(get_maid().dry_run(verbose=True), file=sys.stderr)
 sys.stdout.writelines(get_maid().run())
