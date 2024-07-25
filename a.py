@@ -309,13 +309,14 @@ class A:
         '''
         Return a string representation of this object's pipeline.
         '''
-        s = [str(c) for c in self._commands]
-        s = '\n'.join(s).replace('\n', '\n    | ')
-        if self._mode.startswith('w'):
-            s += '\n    > ' + self._outfile
-        elif self._mode.startswith('a'):
-            s += '\n    >> ' + self._outfile
-        return s
+        commands = '\n'.join(map(str, self._commands)).replace('\n', '\n    | ')
+        append = f'\n    >> {self._outfile}' if self._mode == 'at' else ''
+        truncate = f'\n    > {self._outfile}' if self._mode == 'wt' else ''
+        return '{commands}{truncate}{append}'.format(
+                commands=commands,
+                append=append,
+                truncate=truncate,
+                )
 
     def _wrap_visited(self, f):
         '''
