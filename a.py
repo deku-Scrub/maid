@@ -7,7 +7,6 @@ import subprocess
 
 import maid.exceptions
 import maid.tasks
-import maid.task_runner
 import maid.monitor.hash
 import maid.monitor.time
 
@@ -18,29 +17,7 @@ maids = dict()
 def get_maid(maid_name=DEFAULT_MAID_NAME):
     if not maid_name:
         raise maid.exceptions.MaidNameException()
-    return maids.setdefault(maid_name, M(maid_name))
-
-
-def _add_task(task):
-    _maid = get_maid(task.maid_name)
-
-    match task:
-        case A(name=x) if not x:
-            return False
-        case A(is_default=True):
-            _maid.default_task = task.name
-
-    match task.run_phase:
-        case RunPhase.NORMAL:
-            _maid.tasks[task.name] = task
-        case RunPhase.START:
-            _maid.start_tasks[task.name] = task
-        case RunPhase.END:
-            _maid.end_tasks[task.name] = task
-        case RunPhase.FINALLY:
-            _maid.finally_tasks[task.name] = task
-
-    return True
+    return maids.setdefault(maid_name, _Maid(maid_name))
 
 
 class Pipeline:
@@ -87,50 +64,77 @@ class Pipeline:
         yield from processes[-1].stdout
 
 
-class M:
+class _Maid:
     '''
     '''
 
     def __init__(self, name):
         self.name = name
-        self.default_task = ''
-        self.tasks = dict()
-        self.start_tasks = dict()
-        self.end_tasks = dict()
-        self.finally_tasks = dict()
-
-    def get_task(self, name):
-        return self.tasks[name]
+        self._default_task = None
+        self._tasks = dict()
+        self._start_tasks = dict()
+        self._end_tasks = dict()
+        self._finally_tasks = dict()
 
     def dry_run(self, task_name='', verbose=False):
         tasks = itertools.chain(
-                self.start_tasks.values(),
+                self._start_tasks.values(),
                 (self._get_task(task_name),),
-                self.end_tasks.values(),
-                self.finally_tasks.values(),
+                self._end_tasks.values(),
+                self._finally_tasks.values(),
                 )
         return '\n'.join(map(lambda t: t.dry_run(verbose), tasks))
 
     def _run(self, tasks, capture_outputs=True):
-        outputs = map(A.run, tasks)
+        outputs = map(Task.run, tasks)
         empty_iter = filter(lambda _: False, outputs)
         return outputs if capture_outputs else list(empty_iter)
 
     def run(self, task_name=''):
         try:
-            _ = self._run(self.start_tasks.values(), capture_outputs=False)
+            _ = self._run(self._start_tasks.values(), capture_outputs=False)
             return next(self._run([self._get_task(task_name)]))
         except Exception as err:
             raise err
         finally:
-            _ = self._run(self.finally_tasks.values(), capture_outputs=False)
+            _ = self._run(self._finally_tasks.values(), capture_outputs=False)
 
     def _get_task(self, task_name):
-        if task_name in self.tasks:
-            return self.tasks[task_name]
-        if self.default_task:
-            return self.tasks[self.default_task]
+        if task_name in self._tasks:
+            return self._tasks[task_name]
+        if self._default_task:
+            return self._default_task
         raise maid.exceptions.UnknownTaskException(task)
+
+    def add_task(self, task):
+        '''
+        Add a task.
+
+        If the task name is empty, it will not be added.
+        '''
+        match task:
+            case Task(name=''):
+                return False
+            case Task(name=x) if x in self._tasks:
+                raise maid.exceptions.DuplicateTaskException(task)
+            case Task(is_default=True) if self._default_task:
+                raise maid.exceptions.DuplicateTaskException(task)
+            case Task(is_default=True, run_phase=x) if x != RunPhase.NORMAL:
+                raise maid.exceptions.DefaultTaskRunPhaseException(task)
+            case Task(is_default=True):
+                self._default_task = task
+
+        match task.run_phase:
+            case RunPhase.NORMAL:
+                self._tasks[task.name] = task
+            case RunPhase.START:
+                self._start_tasks[task.name] = task
+            case RunPhase.END:
+                self._end_tasks[task.name] = task
+            case RunPhase.FINALLY:
+                self._finally_tasks[task.name] = task
+
+        return True
 
 
 def _make_hashes(cache, *files):
@@ -172,7 +176,7 @@ class CacheType(enum.Enum):
     TIME = 2
 
 
-class A:
+class Task:
 
     _visited = set()
 
@@ -203,7 +207,7 @@ class A:
         self.inputs = tuple(inputs) if inputs else tuple()
 
         rp = required_tasks if required_tasks else dict()
-        self.required_tasks = {p: get_maid(maid_name).get_task(p) for p in rp}
+        self.required_tasks = {t().name: t() for t in rp}
 
         self.required_files = tuple(required_files) if required_files else tuple()
         self.targets = tuple(targets) if targets else tuple()
@@ -228,7 +232,7 @@ class A:
                 #   * the empty `name` prevents querying maid.
                 #   * the lack of `required_tasks` skips running
                 #     of dependencies.
-                a = A(
+                a = Task(
                     name='',
                     inputs=inputs,
                     required_files=required_files,
@@ -246,19 +250,7 @@ class A:
                 return a
             self._get_independent_task = f
 
-        self._validate()
-        _ = _add_task(self)
-
-    def _validate(self):
-        match self:
-            case A(is_default=True, name=x) if not x:
-                raise maid.exceptions.InvalidTaskNameException()
-            case A(is_default=True, run_phase=x) if x != RunPhase.NORMAL:
-                raise maid.exceptions.DefaultTaskRunPhaseException(self)
-            case A(is_default=True) if get_maid(self.maid_name).default_task:
-                raise maid.exceptions.DuplicateTaskException(self)
-            case A(name=x) if x and (x in get_maid(self.maid_name).tasks):
-                raise maid.exceptions.DuplicateTaskException(self)
+        _ = get_maid(maid_name=maid_name).add_task(self)
 
     def __gt__(self, rhs):
         '''
@@ -319,8 +311,8 @@ class A:
         '''
         Reset visited after running f.
         '''
-        is_root = not A._visited
-        A._visited.add(self.name)
+        is_root = not Task._visited
+        Task._visited.add(self.name)
         try:
             return f()
         except Exception as err:
@@ -329,13 +321,13 @@ class A:
             # Clear visited list once the pipeline has finished
             # so that other pipelines can run correctly.
             if is_root:
-                A._visited.clear()
+                Task._visited.clear()
 
     def _get_required_dry_runs(self, verbose):
         return lambda: '\n'.join(
             p.dry_run(verbose)
             for p in self.required_tasks.values()
-            if p.name not in A._visited
+            if p.name not in Task._visited
             )
 
     def dry_run(self, verbose=False):
@@ -394,12 +386,12 @@ class A:
             raise error
 
     def _run_dependencies(self):
-        # Checking that `p.name not in A._visited` prevents reruning
+        # Checking that `p.name not in Task._visited` prevents reruning
         # pipelines that have already run.
         self._throw_if_any_fail(
                 lambda p: p.run(),
                 (p for p in self.required_tasks.values()
-                 if p.name not in A._visited
+                 if p.name not in Task._visited
                  ))
 
     def _stop_early(self):
@@ -559,22 +551,25 @@ def task(
         independent_targets=False,
         is_default=False,
         ):
-    def _f(g):
-        p = A(
+
+    def build_task(define_commands):
+        t = Task(
                 name,
                 inputs=inputs,
                 required_files=required_files,
                 targets=targets,
                 cache=cache,
                 is_default=is_default,
-                independent_targets_creator=g if independent_targets else None,
+                independent_targets_creator=define_commands if independent_targets else None,
                 required_tasks=required_tasks,
                 output_stream=output_stream,
                 script_stream=script_stream,
                 )
-        # Let `g` immediately create commands for `p`.
-        g(p)
-    return _f
+        # Let `define_commands` immediately create commands for the task.
+        define_commands(t)
+        return lambda: t
+
+    return build_task
 
 @task(
     'p1',
@@ -596,7 +591,7 @@ def h(a):
 
 @task(
     'p2',
-    required_tasks=['p1'],
+    required_tasks=[h],
     output_stream=sys.stdout,
     script_stream=sys.stderr,
     is_default=True,
@@ -607,7 +602,7 @@ def h2(a):
 print(get_maid().dry_run(verbose=True), file=sys.stderr)
 sys.stdout.writelines(get_maid().run())
 
-a = A(inputs=(j for j in range(100))) \
+a = Task(inputs=(j for j in range(100))) \
     | (filter, lambda x: x % 3 == 0) \
     | 'parallel {args} "echo paraLOL; echo {{}}"'.format(args='--bar') \
     | 'grep -i lol' \
@@ -627,7 +622,7 @@ import itertools
 stem = lambda x: [w.lower().rstrip(",.!:;'-\"").lstrip("'\"") for w in x]
 flatten = lambda x: (col for row in x for col in row)
 counter = collections.Counter()
-a = A(inputs=['this cat jumped over this other cat!']) \
+a = Task(inputs=['this cat jumped over this other cat!']) \
     | str.split \
     | stem \
     | counter.update
