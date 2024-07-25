@@ -68,18 +68,15 @@ class Pipeline:
     def __str__(self):
         return '\n'.join(self._commands)
 
-    def _pipe_process_to_command(self, process, cmd):
-        return process + [self._make_process(cmd, process[-1].stdout)]
-
     def __call__(self, inputs=None):
         inputs = inputs if inputs else tuple()
 
         # Hook up command outputs to inputs.
-        processes = functools.reduce(
-                self._pipe_process_to_command,
+        processes = list(itertools.accumulate(
                 self._commands[1:],
-                [self._make_process(self._commands[0], subprocess.PIPE)],
-                )
+                lambda process, cmd: self._make_process(cmd, process.stdout),
+                initial=self._make_process(self._commands[0], subprocess.PIPE),
+                ))
 
         # Write to first command.
         processes[0].stdin.writelines(str(i) + '\n' for i in inputs)
@@ -372,10 +369,8 @@ class A:
         return output
 
     def _print_scripts(self, command):
-        if not self._script_stream:
-            return
-
-        self._script_stream.write(str(command) + '\n')
+        if self._script_stream:
+            self._script_stream.write(str(command) + '\n')
 
     def run(self):
         '''
