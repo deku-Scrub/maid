@@ -130,7 +130,7 @@ class M:
             return self.tasks[task_name]
         if self.default_task:
             return self.tasks[self.default_task]
-        raise Exception('Unknown pipeline.  Maid `{}` has no pipeline named `{}`'.format(self.name, task_name))
+        raise maid.exceptions.UnknownTaskException(task)
 
 
 def _make_hashes(cache, *files):
@@ -296,7 +296,7 @@ class A:
                 self._commands[-1].append(rhs)
             case (tuple(), _):
                 self._commands.append(rhs)
-            case (callable, _):
+            case (x, _) if callable(x):
                 self._commands.append(rhs)
             case _:
                 raise Exception('Unknown command type used with `|`: {}.  Only `str`, `callable`, and `tuple` instances are supported.'.format(type(rhs)))
@@ -424,6 +424,18 @@ class A:
         self._run_dependencies()
         return self._stop_early()
 
+    def _run_command(self, inputs, command):
+        self._print_scripts(command)
+        match command:
+            case Pipeline():
+                return command(inputs)
+            case tuple():
+                return command[0](*command[1:], inputs)
+            case _ if callable(command):
+                return map(command, inputs)
+            case _:
+                raise Exception('unknown command type: `{}`'.format(command))
+
     def _main_run(self):
         '''
         Logic for running the pipeline.
@@ -441,24 +453,19 @@ class A:
                     )
             return tuple()
         else:
-            inputs = self.inputs
-            for command in self._commands:
-                self._print_scripts(command)
-                if isinstance(command, Pipeline):
-                    inputs = command(inputs)
-                elif callable(command):
-                    inputs = map(command, inputs)
-                elif isinstance(command, tuple):
-                    inputs = command[0](*command[1:], inputs)
-            return inputs # ie, outputs.
+            return functools.reduce(
+                    self._run_command,
+                    self._commands,
+                    self.inputs,
+                    )
 
     def _run(self):
         '''
         Execute the pre-, main-, and post-run stages.
         '''
         try:
-            if (r := self._prerun()) and r[0]:
-                return r[1]
+            if (stop_early := self._prerun()) and stop_early[0]:
+                return stop_early[1]
             outputs = self._main_run()
             # The post-run step has already been done by the
             # independent tasks.  Doing it again would cause
