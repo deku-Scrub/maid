@@ -334,32 +334,40 @@ class A:
             if is_root:
                 A._visited.clear()
 
+    def _get_required_dry_runs(self, verbose):
+        return lambda: '\n'.join(
+            p.dry_run(verbose)
+            for p in self.required_tasks.values()
+            if p.name not in A._visited
+            )
+
     def dry_run(self, verbose=False):
         '''
         Return a string containing all steps that a call to `run`
         would execute.
         '''
-        f = lambda : '\n'.join(p.dry_run(verbose) for p in self.required_tasks.values() if p.name not in A._visited)
-
         # This goes before anything below it because `_should_run`
         # depends on the traversal's output.
-        output = self._wrap_visited(f)
+        output = self._wrap_visited(self._get_required_dry_runs(verbose))
 
+        # Won't run so nothing to show.
         if (should := self._should_run()) and not should[0]:
             return ''
 
         if not verbose:
             return '{}\n{} ({})'.format(output, self.name, should[1])
 
-        output += '''
+        return '''
+        \r{previous_tasks}
         \r########################################
-        \r# Pipeline `{}` will run due to {}
-        \r{}
+        \r# Pipeline `{task_name}` will run due to {run_reason}
+        \r{recipe}
         \r########################################
         '''.format(
-            self.name,
-                 should[1],
-                 str(self),
+                previous_tasks=output,
+                task_name=self.name,
+                run_reason=should[1],
+                recipe=str(self),
                 )
         return output
 
