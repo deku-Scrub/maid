@@ -61,3 +61,14 @@ class UnknownCommandTypeException(Exception):
         '''
         msg = 'Unknown command type used with `|`: {}.  Only `str`, `callable`, and `tuple` instances are supported.'.format(command)
         super().__init__(msg)
+
+
+class MissingTargetException(Exception):
+    '''
+    '''
+
+    def __init__(self, task, filename):
+        '''
+        '''
+        msg = 'Task `{task}` ran without error but did not create expected files: `{filename}` not found.'.format(task=task.name, filename=filename)
+        super().__init__(msg)

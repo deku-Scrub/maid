@@ -493,9 +493,8 @@ class A:
             if self._output_stream:
                 self._output_stream.writelines(outputs)
 
-        if (f := maid.task_runner.is_any_target_not_found(self.name, self.targets)):
-            msg = 'Task `{task}` ran without error but did not create expected files: `{filename}` not found.'.format(task=self.name, filename=f)
-            raise maid.task_runner.MissingExpectedTargetsException(msg)
+        if (f := _any_files_missing(self.targets)):
+            raise maid.exceptions.MissingTargetException(task, f)
 
         _make_hashes(self._cache, self.targets, self.required_files)
 
