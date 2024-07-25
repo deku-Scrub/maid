@@ -14,7 +14,7 @@ class DefaultTaskRunPhaseException(Exception):
     def __init__(self, task):
         '''
         '''
-        msg = 'Only pipelines in the `NORMAL` run phase can be a default; was given `{}` for pipeline `{}`.'.format(
+        msg = 'Only pipelines in the `NORMAL` run phase can be a default; was given `{}` for task `{}`.'.format(
             task.run_phase,
             task.name,
             )
@@ -36,6 +36,18 @@ class DuplicateTaskException(Exception):
         '''
         '''
         msg = 'Maid `{}` already has task named `{}`.'.format(
+                    task.maid_name,
+                    task.name,
+                    )
+        super().__init__(msg)
+
+
+class UnknownTaskException(Exception):
+
+    def __init__(self, task):
+        '''
+        '''
+        msg = 'Unknown task.  Maid `{}` has no task named `{}`'.format(
                     task.maid_name,
                     task.name,
                     )
