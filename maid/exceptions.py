@@ -52,3 +52,12 @@ class UnknownTaskException(Exception):
                     task.name,
                     )
         super().__init__(msg)
+
+
+class UnknownCommandTypeException(Exception):
+
+    def __init__(self, command):
+        '''
+        '''
+        msg = 'Unknown command type used with `|`: {}.  Only `str`, `callable`, and `tuple` instances are supported.'.format(command)
+        super().__init__(msg)

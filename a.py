@@ -299,7 +299,7 @@ class A:
             case (x, _) if callable(x):
                 self._commands.append(rhs)
             case _:
-                raise Exception('Unknown command type used with `|`: {}.  Only `str`, `callable`, and `tuple` instances are supported.'.format(type(rhs)))
+                raise maid.exceptions.UnknownCommandTypeException(rhs)
         return self
 
     def __str__(self):
@@ -434,7 +434,7 @@ class A:
             case _ if callable(command):
                 return map(command, inputs)
             case _:
-                raise Exception('unknown command type: `{}`'.format(command))
+                raise maid.exceptions.UnknownCommandTypeException(command)
 
     def _main_run(self):
         '''
