@@ -289,16 +289,20 @@ class A:
         '''
         Add `rhs`'s command to this object's command list.
         '''
-        if isinstance(rhs, str):
-            if (not self._commands) or (not isinstance(self._commands[-1], Pipeline)):
-                self._commands.append(Pipeline())
-            self._commands[-1].append(rhs)
-        elif callable(rhs):
-            self._commands.append(rhs)
-        elif isinstance(rhs, tuple):
-            self._commands.append(rhs)
-        else:
-            raise Exception('Unknown command type used with `|`: {}.  Only `str`, `callable`, and `tuple` instances are supported.'.format(type(rhs)))
+        match (rhs, self._commands):
+            case (str(), x):
+                match x:
+                    case []:
+                        self._commands.append(Pipeline())
+                    case list() if not isinstance(x[-1], Pipeline):
+                        self._commands.append(Pipeline())
+                self._commands[-1].append(rhs)
+            case (tuple(), _):
+                self._commands.append(rhs)
+            case (callable, _):
+                self._commands.append(rhs)
+            case _:
+                raise Exception('Unknown command type used with `|`: {}.  Only `str`, `callable`, and `tuple` instances are supported.'.format(type(rhs)))
         return self
 
     def __str__(self):
