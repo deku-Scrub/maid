@@ -75,9 +75,9 @@ class TaskCacher:
 
 def _update_files(cache, filenames):
     if cache == CacheType.TIME:
-        maid.monitor.time.touch_files(maid.tasks.get_filenames(filenames))
+        maid.cache.timestamp.touch_files(maid.tasks.get_filenames(filenames))
     elif cache == CacheType.HASH:
-        maid.monitor.hash.make_hashes(maid.tasks.get_filenames(filenames))
+        maid.cache.filehash.make_hashes(maid.tasks.get_filenames(filenames))
 
 
 def any_files_missing(filenames, must_exist=True):
