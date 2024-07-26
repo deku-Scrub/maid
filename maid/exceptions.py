@@ -72,3 +72,25 @@ class MissingTargetException(Exception):
         '''
         msg = 'Task `{task}` ran without error but did not create expected files: `{filename}` not found.'.format(task=task.name, filename=filename)
         super().__init__(msg)
+
+
+class InvalidFileTypeException(Exception):
+    '''
+    '''
+
+    def __init__(self, filename):
+        '''
+        '''
+        msg = 'The right operand of `>` and `>>` must be a string, instead got {}'.format(filename)
+        super().__init__(msg)
+
+
+class EmptyOutputFileException(Exception):
+    '''
+    '''
+
+    def __init__(self):
+        '''
+        '''
+        msg = 'The right operand of `>` and `>>` must not be empty'
+        super().__init__(msg)

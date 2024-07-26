@@ -24,13 +24,13 @@ class Pipeline:
     '''
     '''
 
-    def __init__(self, commands=None):
-        self._commands = commands if commands else []
+    def __init__(self):
+        self._commands = []
 
     def append(self, cmd):
         self._commands.append(cmd)
 
-    def _make_process(self, cmd, stdin):
+    def _make_process(cmd, stdin):
         '''
         Make process with the necessary common parameters.
         '''
@@ -46,16 +46,15 @@ class Pipeline:
         return '\n'.join(self._commands)
 
     def __call__(self, inputs=None):
-        inputs = inputs if inputs else tuple()
-
         # Hook up command outputs to inputs.
         processes = list(itertools.accumulate(
                 self._commands[1:],
-                lambda process, cmd: self._make_process(cmd, process.stdout),
-                initial=self._make_process(self._commands[0], subprocess.PIPE),
+                lambda proc, cmd: Pipeline._make_process(cmd, proc.stdout),
+                initial=Pipeline._make_process(self._commands[0], subprocess.PIPE),
                 ))
 
         # Write to first command.
+        inputs = inputs if inputs else tuple()
         processes[0].stdin.writelines(str(i) + '\n' for i in inputs)
         processes[0].stdin.flush()
         processes[0].stdin.close()
@@ -252,12 +251,19 @@ class Task:
 
         _ = get_maid(maid_name=maid_name).add_task(self)
 
+    def _validate_filename(filename):
+        if not isinstance(filename, str):
+            raise maid.exceptions.InvalidFileTypeException(filename)
+        if not filename:
+            raise maid.exceptions.EmptyOutputFileException()
+
     def __gt__(self, rhs):
         '''
         Write to file given by `rhs`.
 
         The file is truncated first.
         '''
+        Task._validate_filename(rhs)
         self._outfile = rhs
         self._mode = 'wt'
         return self
@@ -270,6 +276,7 @@ class Task:
         precedence over `|` and results in an error unless everything
         before the `>>` is wrapped in parentheses.
         '''
+        Task._validate_filename(rhs)
         self._outfile = rhs
         self._mode = 'at'
         return self
@@ -278,17 +285,17 @@ class Task:
         '''
         Add `rhs`'s command to this object's command list.
         '''
-        match (rhs, self._commands):
-            case (str(), x):
-                match x:
+        match rhs:
+            case str():
+                match self._commands:
                     case []:
                         self._commands.append(Pipeline())
-                    case list() if not isinstance(x[-1], Pipeline):
+                    case list(x) if not isinstance(x[-1], Pipeline):
                         self._commands.append(Pipeline())
                 self._commands[-1].append(rhs)
-            case (tuple(), _):
+            case tuple():
                 self._commands.append(rhs)
-            case (x, _) if callable(x):
+            case x if callable(x):
                 self._commands.append(rhs)
             case _:
                 raise maid.exceptions.UnknownCommandTypeException(rhs)
@@ -307,12 +314,12 @@ class Task:
                 truncate=truncate,
                 )
 
-    def _wrap_visited(self, f):
+    def _wrap_visited(f, task_name):
         '''
         Reset visited after running f.
         '''
         is_root = not Task._visited
-        Task._visited.add(self.name)
+        Task._visited.add(task_name)
         try:
             return f()
         except Exception as err:
@@ -323,11 +330,11 @@ class Task:
             if is_root:
                 Task._visited.clear()
 
-    def _get_required_dry_runs(self, verbose):
+    def _get_required_dry_runs(tasks, verbose):
         return lambda: '\n'.join(
-            p.dry_run(verbose)
-            for p in self.required_tasks.values()
-            if p.name not in Task._visited
+            t.dry_run(verbose)
+            for t in tasks
+            if t.name not in Task._visited
             )
 
     def dry_run(self, verbose=False):
@@ -337,7 +344,13 @@ class Task:
         '''
         # This goes before anything below it because `_should_run`
         # depends on the traversal's output.
-        output = self._wrap_visited(self._get_required_dry_runs(verbose))
+        output = Task._wrap_visited(
+                Task._get_required_dry_runs(
+                    self.required_tasks.values(),
+                    verbose,
+                    ),
+                self.name,
+                )
 
         # Won't run so nothing to show.
         if (should := self._should_run()) and not should[0]:
@@ -360,17 +373,17 @@ class Task:
                 )
         return output
 
-    def _print_scripts(self, command):
-        if self._script_stream:
-            self._script_stream.write(str(command) + '\n')
+    def _print_scripts(outstream, command):
+        if outstream:
+            outstream.write(str(command) + '\n')
 
     def run(self):
         '''
         Run pipeline.
         '''
-        return self._wrap_visited(self._run)
+        return Task._wrap_visited(self._run, self.name)
 
-    def _throw_if_any_fail(self, f, iterable):
+    def _throw_if_any_fail(f, iterable, *, delay_throw=False):
         error = None
         for val in iterable:
             try:
@@ -378,21 +391,21 @@ class Task:
             except Exception as err:
                 # Save first error and continue if so specified.
                 error = error if error else err
-                if not self._finish_depth_on_failure:
+                if not delay_throw:
                     raise error
 
         # Raise error, if any, once the depth is complete.
         if error:
             raise error
 
-    def _run_dependencies(self):
+    def _run_dependencies(tasks, *, delay_throw=False):
         # Checking that `p.name not in Task._visited` prevents reruning
         # pipelines that have already run.
-        self._throw_if_any_fail(
-                lambda p: p.run(),
-                (p for p in self.required_tasks.values()
-                 if p.name not in Task._visited
-                 ))
+        Task._throw_if_any_fail(
+                Task.run,
+                (t for t in tasks if t.name not in Task._visited),
+                delay_throw=delay_throw,
+                )
 
     def _stop_early(self):
         '''
@@ -413,11 +426,14 @@ class Task:
         '''
         Run functions that the pipeline requires to have finished.
         '''
-        self._run_dependencies()
+        Task._run_dependencies(
+                self.required_tasks.values(),
+                delay_throw=self._finish_depth_on_failure,
+                )
         return self._stop_early()
 
-    def _run_command(self, inputs, command):
-        self._print_scripts(command)
+    def _run_command(inputs, command, outstream=sys.stdout):
+        Task._print_scripts(outstream, command)
         match command:
             case Pipeline():
                 return command(inputs)
@@ -439,14 +455,15 @@ class Task:
         # Can't guarantee that they're all the same length.  Too
         # many problems.  Either end in `>` or ignore output.
         if self._get_independent_task:
-            self._throw_if_any_fail(
+            Task._throw_if_any_fail(
                     lambda f: self._get_independent_task(f).run(),
                     maid.tasks.get_filenames(self.targets),
+                    delay_throw=self._finish_depth_on_failure,
                     )
             return tuple()
         else:
             return functools.reduce(
-                    self._run_command,
+                    lambda i, c: Task._run_command(i, c, self._script_stream),
                     self._commands,
                     self.inputs,
                     )
@@ -477,7 +494,9 @@ class Task:
         Run functions that require the pipeline to have finished.
         '''
         if self._outfile:
-            self._print_scripts('{} {}\n'.format(
+            Task._print_scripts(
+                    self._script_stream,
+                    '{} {}\n'.format(
                         '>' if self._mode.startswith('w') else '>>',
                         self._outfile,
                         ))
