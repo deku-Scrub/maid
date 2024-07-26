@@ -6,6 +6,7 @@ import subprocess
 
 import maid.exceptions
 import maid.cache
+import maid.files
 
 
 def _print_scripts(outstream, command):
@@ -395,7 +396,7 @@ class Task:
         if self._get_independent_task:
             Task._throw_if_any_fail(
                     lambda f: self._get_independent_task(f).run(),
-                    maid.tasks.get_filenames(self.targets),
+                    maid.files.get_filenames(self.targets),
                     delay_throw=self._finish_depth_on_failure,
                     )
             return tuple()
@@ -419,7 +420,7 @@ class Task:
         except Exception as err:
             msg = 'Error running task `{}`: {}'.format(self.name, err)
             maid.error_utils.remove_files_and_throw(
-                    maid.tasks.get_filenames(self.targets) if self._delete_targets_on_error else [],
+                    maid.files.get_filenames(self.targets) if self._delete_targets_on_error else [],
                     Exception(msg),
                     )
 

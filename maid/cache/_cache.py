@@ -3,6 +3,7 @@ import os
 
 import maid.cache.filehash
 import maid.cache.timestamp
+import maid.files
 
 
 class CacheType(enum.Enum):
@@ -75,13 +76,13 @@ class TaskCacher:
 
 def _update_files(cache, filenames):
     if cache == CacheType.TIME:
-        maid.cache.timestamp.touch_files(maid.tasks.get_filenames(filenames))
+        maid.cache.timestamp.touch_files(maid.files.get_filenames(filenames))
     elif cache == CacheType.HASH:
-        maid.cache.filehash.make_hashes(maid.tasks.get_filenames(filenames))
+        maid.cache.filehash.make_hashes(maid.files.get_filenames(filenames))
 
 
 def any_files_missing(filenames, must_exist=True):
-    filenames = maid.tasks.get_filenames(filenames, must_exist=must_exist)
+    filenames = maid.files.get_filenames(filenames, must_exist=must_exist)
     return next((f for f in filenames if not os.path.exists(f)), '')
 
 
