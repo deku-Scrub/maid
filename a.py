@@ -1,13 +1,11 @@
 import itertools
 import enum
-import os
 import sys
 
 import maid.exceptions
 import maid.tasks
-import maid.monitor.hash
-import maid.monitor.time
 import maid.composition
+import maid.cache
 
 DEFAULT_MAID_NAME = 'm0'
 maids = dict()
@@ -92,29 +90,11 @@ class _Maid:
         return True
 
 
-def update_files(cache, filenames):
-    if cache == CacheType.TIME:
-        maid.monitor.time.touch_files(maid.tasks.get_filenames(filenames))
-    elif cache == CacheType.HASH:
-        maid.monitor.hash.make_hashes(maid.tasks.get_filenames(filenames))
-
-
-def _any_files_missing(filenames, must_exist=True):
-    filenames = maid.tasks.get_filenames(filenames, must_exist=must_exist)
-    return next((f for f in filenames if not os.path.exists(f)), '')
-
-
 class RunPhase(enum.Enum):
     NORMAL = 0
     START = 1
     END = 2
     FINALLY = 3
-
-
-class CacheType(enum.Enum):
-    NONE = 0
-    HASH = 1
-    TIME = 2
 
 
 class Task:
@@ -134,7 +114,7 @@ class Task:
             required_tasks=None, # o
             required_files=None, # o
             targets=None, # o
-            cache=CacheType.NONE, # o
+            cache=maid.cache.CacheType.NONE, # o
             independent_targets_creator=None,
             script_stream=None, # o
             output_stream=None, # o
@@ -149,7 +129,7 @@ class Task:
         rp = required_tasks if required_tasks else dict()
         self.required_tasks = {t().name: t() for t in rp}
 
-        self._task_cacher = TaskCacher(self)
+        self._task_cacher = maid.cache.TaskCacher(self)
         self._simple_task = maid.composition.SimpleTask(
                 inputs=inputs,
                 script_stream=script_stream,
@@ -368,7 +348,7 @@ class Task:
         '''
         Run functions that require the task to have finished.
         '''
-        if (f := _any_files_missing(self.targets)):
+        if (f := maid.cache.any_files_missing(self.targets)):
             raise maid.exceptions.MissingTargetException(task, f)
 
         self._task_cacher.cache()
@@ -383,75 +363,13 @@ class Task:
                 )
 
 
-class TaskCacher:
-
-    def __init__(self, task):
-        self._task = task
-
-    def cache(self):
-        '''
-        '''
-        update_files(self._task.cache, self._task.targets)
-        update_files(self._task.cache, self._task.required_files)
-
-    def is_up_to_date(self):
-        '''
-        '''
-        # Checks based on file existance.
-        if (f := _any_files_missing(self._task.targets, must_exist=False)):
-            return False, f'missing target `{f}`'
-        if self._task.dont_run_if_all_targets_exist:
-            return True, ''
-
-        # Checks based on cache type.
-        if self._task.cache == CacheType.NONE:
-            return False, 'uncached task'
-        return self._is_cached()
-
-    def _is_cached(self):
-        # Get appropriate decision function.
-        should_task_run = maid.monitor.hash.should_task_run
-        if self._task.cache == CacheType.TIME:
-            should_task_run = maid.monitor.time.should_task_run
-
-        if should_task_run(self._get_graph())(self._task.name):
-            return False, 'targets out of date'
-        return True, ''
-
-    def _get_graph(self):
-        '''
-        '''
-        task = self._task
-
-        # This is the graph required for the time and hash cache
-        # decision functions.
-        graph = {
-            p.name: maid.tasks.Task(
-                    p.name,
-                    lambda a: a, # This doesn't matter; never runs.
-                    targets=p.targets,
-                    )
-            for p in task.required_tasks.values()
-        }
-        graph[task.name] = maid.tasks.Task(
-                    task.name,
-                    lambda a: a, # This doesn't matter; never runs.
-                    targets=task.targets,
-                    required_files=task.required_files,
-                    required_tasks=tuple(
-                        [p.name for p in task.required_tasks.values()]
-                        ),
-                    )
-        return graph
-
-
 def task(
         name,
         inputs=None,
         required_files=tuple(),
         required_tasks=tuple(),
         targets=tuple(),
-        cache=CacheType.NONE,
+        cache=maid.cache.CacheType.NONE,
         output_stream=sys.stdout,
         script_stream=sys.stderr,
         independent_targets=False,
@@ -482,7 +400,7 @@ def task(
     inputs=['lol\n', '.lol\n'],
     required_files=['requirements.txt'],
     targets=['a.txt', 'b.txt'],
-    cache=CacheType.HASH,
+    cache=maid.cache.CacheType.HASH,
     script_stream=sys.stdout,
     independent_targets=True,
 )
