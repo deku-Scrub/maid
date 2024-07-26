@@ -43,35 +43,9 @@ class TaskCacher:
         if self._task.cache == CacheType.TIME:
             should_task_run = maid.cache.timestamp.should_task_run
 
-        if should_task_run(self._get_graph())(self._task.name):
+        if should_task_run(self._task):
             return False, 'targets out of date'
         return True, ''
-
-    def _get_graph(self):
-        '''
-        '''
-        task = self._task
-
-        # This is the graph required for the time and hash cache
-        # decision functions.
-        graph = {
-            p.name: maid.tasks.Task(
-                    p.name,
-                    lambda a: a, # This doesn't matter; never runs.
-                    targets=p.targets,
-                    )
-            for p in task.required_tasks.values()
-        }
-        graph[task.name] = maid.tasks.Task(
-                    task.name,
-                    lambda a: a, # This doesn't matter; never runs.
-                    targets=task.targets,
-                    required_files=task.required_files,
-                    required_tasks=tuple(
-                        [p.name for p in task.required_tasks.values()]
-                        ),
-                    )
-        return graph
 
 
 def _update_files(cache, filenames):
@@ -84,5 +58,3 @@ def _update_files(cache, filenames):
 def any_files_missing(filenames, must_exist=True):
     filenames = maid.files.get_filenames(filenames, must_exist=must_exist)
     return next((f for f in filenames if not os.path.exists(f)), '')
-
-
