@@ -42,7 +42,7 @@ def task(
     inputs=['lol\n', '.lol\n'],
     required_files=['requirements.txt'],
     targets=['a.txt', 'b.txt'],
-    cache=maid.cache.CacheType.TIME,
+    cache=maid.cache.CacheType.HASH,
     script_stream=sys.stdout,
     independent_targets=True,
 )

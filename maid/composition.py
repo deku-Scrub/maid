@@ -379,7 +379,7 @@ class Task:
         if self._task_cacher.is_up_to_date()[0]:
             return True, tuple()
         if self.update_requested:
-            self._task_cacher.cache()
+            self._task_cacher.cache_all()
             return True, tuple()
         return False, ''
 
@@ -431,7 +431,7 @@ class Task:
         if (f := maid.cache.any_files_missing(self.targets)):
             raise maid.exceptions.MissingTargetException(task, f)
 
-        self._task_cacher.cache()
+        self._task_cacher.cache_targets()
 
     def _run_dependencies(tasks, *, delay_throw=False):
         # Checking that `p.name not in Task._visited` prevents reruning
