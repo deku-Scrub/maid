@@ -3,12 +3,12 @@ import itertools
 import enum
 import os
 import sys
-import subprocess
 
 import maid.exceptions
 import maid.tasks
 import maid.monitor.hash
 import maid.monitor.time
+import maid.composition
 
 DEFAULT_MAID_NAME = 'm0'
 maids = dict()
@@ -18,49 +18,6 @@ def get_maid(maid_name=DEFAULT_MAID_NAME):
     if not maid_name:
         raise maid.exceptions.MaidNameException()
     return maids.setdefault(maid_name, _Maid(maid_name))
-
-
-class Pipeline:
-    '''
-    '''
-
-    def __init__(self):
-        self._commands = []
-
-    def append(self, cmd):
-        self._commands.append(cmd)
-
-    def _make_process(cmd, stdin):
-        '''
-        Make process with the necessary common parameters.
-        '''
-        return subprocess.Popen(
-                cmd,
-                stdin=stdin,
-                stdout=subprocess.PIPE,
-                shell=True,
-                text=True,
-                )
-
-    def __str__(self):
-        return '\n'.join(self._commands)
-
-    def __call__(self, inputs=None):
-        # Hook up command outputs to inputs.
-        processes = list(itertools.accumulate(
-                self._commands[1:],
-                lambda proc, cmd: Pipeline._make_process(cmd, proc.stdout),
-                initial=Pipeline._make_process(self._commands[0], subprocess.PIPE),
-                ))
-
-        # Write to first command.
-        inputs = inputs if inputs else tuple()
-        processes[0].stdin.writelines(str(i) + '\n' for i in inputs)
-        processes[0].stdin.flush()
-        processes[0].stdin.close()
-
-        # Yield output of last command.
-        yield from processes[-1].stdout
 
 
 class _Maid:
@@ -195,9 +152,9 @@ class SimpleTask:
             case str():
                 match self._commands:
                     case []:
-                        self._commands.append(Pipeline())
-                    case list(x) if not isinstance(x[-1], Pipeline):
-                        self._commands.append(Pipeline())
+                        self._commands.append(maid.composition.ShellPipeline())
+                    case list(x) if not isinstance(x[-1], maid.composition.ShellPipeline):
+                        self._commands.append(maid.composition.ShellPipeline())
                 self._commands[-1].append(command)
             case tuple():
                 self._commands.append(command)
@@ -249,7 +206,7 @@ class SimpleTask:
     def _run_command(self, inputs, command):
         _print_scripts(self._script_stream, command)
         match command:
-            case Pipeline():
+            case maid.composition.ShellPipeline():
                 return command(inputs)
             case tuple():
                 return command[0](*command[1:], inputs)
@@ -272,7 +229,6 @@ class SimpleTask:
         if not _write_to_file(outputs, self._outfile, self._mode):
             if self._output_stream:
                 self._output_stream.writelines(outputs)
-
 
 
 def _print_scripts(outstream, command):
