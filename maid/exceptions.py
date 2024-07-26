@@ -94,3 +94,14 @@ class EmptyOutputFileException(Exception):
         '''
         msg = 'The right operand of `>` and `>>` must not be empty'
         super().__init__(msg)
+
+
+class UnknownCacheTypeException(Exception):
+    '''
+    '''
+
+    def __init__(self, cache):
+        '''
+        '''
+        msg = 'Unknown cache type `{}`.  Cannot update files.'.format(cache)
+        super().__init__(msg)
