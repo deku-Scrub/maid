@@ -17,11 +17,19 @@ class TaskCacher:
     def __init__(self, task):
         self._task = task
 
-    def cache(self):
+    def cache_targets(self):
         '''
         '''
-        _update_files(self._task.cache, self._task.targets)
+        if self._task.cache == CacheType.HASH:
+            # Cache everything because required files might have
+            # been missing.
+            self.cache_all()
+        elif self._task.cache == CacheType.TIME:
+            _update_files(self._task.cache, self._task.targets)
+
+    def cache_all(self):
         _update_files(self._task.cache, self._task.required_files)
+        _update_files(self._task.cache, self._task.targets)
 
     def is_up_to_date(self):
         '''
