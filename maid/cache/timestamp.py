@@ -1,6 +1,8 @@
 import pathlib
 import os
 
+import maid.files
+
 
 def touch_files(filenames):
     for f in filenames:
@@ -18,27 +20,23 @@ def _is_any_newer(filenames, target_time, must_exist=True):
     return False
 
 
-def should_task_run(graph):
-    def f(task_name):
-        task = graph[task_name]
-        # If any outputs don't exist, the task should run.
-        oldest_time = float('inf')
-        for o in task.get_targets():
-            if not os.path.exists(o):
-                return (task_name, o)
-            oldest_time = min(os.path.getmtime(o), oldest_time)
+def should_task_run(task):
+    # If any outputs don't exist, the task should run.
+    oldest_time = float('inf')
+    for o in maid.files.get_filenames(task.targets):
+        if not os.path.exists(o):
+            return (task.name, o)
+        oldest_time = min(os.path.getmtime(o), oldest_time)
 
-        # If any outputs are newer than required files, the task
-        # should run.
-        if _is_any_newer(task.get_required_files(), oldest_time):
-            return (task_name, '')
+    # If any outputs are newer than required files, the task
+    # should run.
+    if _is_any_newer(maid.files.get_filenames(task.required_files), oldest_time):
+        return (task.name, '')
 
-        # If any outputs of required tasks have been updated, the
-        # task should run.
-        for req in task.required_tasks:
-            if _is_any_newer(graph[req].get_targets(), oldest_time, must_exist=False):
-                return (req, '')
+    # If any outputs of required tasks have been updated, the
+    # task should run.
+    for req in task.required_tasks:
+        if _is_any_newer(maid.files.get_filenames(req.targets), oldest_time, must_exist=False):
+            return (req, '')
 
-        return tuple()
-
-    return f
+    return tuple()

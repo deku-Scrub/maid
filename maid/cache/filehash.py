@@ -4,6 +4,8 @@ import os
 import base64
 import time
 
+import maid.files
+
 
 # TODO: make this a config value.
 index_dir = os.path.join('.maid', 'index')
@@ -80,31 +82,26 @@ def _is_newer(filename, timestamp):
     return _get_hash_creation_time(filename) > timestamp
 
 
-def should_task_run(graph):
-    def _should_it(task_name):
-        task = graph[task_name]
+def should_task_run(task):
+    oldest_time = float('inf')
+    # If any outputs or their hashes don't exist, the task should run.
+    for f in maid.files.get_filenames(task.targets):
+        if _is_hash_changed(f):
+            return (task.name, '')
+        if (hash_time := _get_hash_creation_time(f)) < oldest_time:
+            oldest_time = hash_time
 
-        oldest_time = float('inf')
-        # If any outputs or their hashes don't exist, the task should run.
-        for f in task.get_targets():
-            if _is_hash_changed(f):
-                return (task_name, '')
-            if (hash_time := _get_hash_creation_time(f)) < oldest_time:
-                oldest_time = hash_time
+    # If any inputs have a new hash, the task should run.
+    if any(_is_hash_changed(f) for f in maid.files.get_filenames(task.required_files)):
+        return (task.name, '')
 
-        # If any inputs have a new hash, the task should run.
-        if any(_is_hash_changed(f) for f in task.get_required_files()):
-            return (task_name, '')
+    # If any outputs of required tasks have a new hash, the
+    # task should run.
+    for req in task.required_tasks:
+        for f in maid.files.get_filenames(req.targets):
+            if _is_hash_changed(f, must_exist=False):
+                return (req, '')
+            if _is_newer(f, oldest_time):
+                return (req, '')
 
-        # If any outputs of required tasks have a new hash, the
-        # task should run.
-        for req in task.required_tasks:
-            for f in graph[req].get_targets():
-                if _is_hash_changed(f, must_exist=False):
-                    return (req, '')
-                if _is_newer(f, oldest_time):
-                    return (req, '')
-
-        return tuple()
-
-    return _should_it
+    return tuple()

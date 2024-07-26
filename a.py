@@ -2,8 +2,7 @@ import itertools
 import enum
 import sys
 
-import maid.exceptions
-import maid.tasks
+import maid.cache
 
 
 def task(
@@ -43,7 +42,7 @@ def task(
     inputs=['lol\n', '.lol\n'],
     required_files=['requirements.txt'],
     targets=['a.txt', 'b.txt'],
-    cache=maid.cache.CacheType.HASH,
+    cache=maid.cache.CacheType.TIME,
     script_stream=sys.stdout,
     independent_targets=True,
 )
