@@ -136,13 +136,6 @@ class _Maid:
         return True
 
 
-def _make_hashes(cache, *files):
-    if cache != CacheType.HASH:
-        return
-    for filenames in files:
-        maid.monitor.hash.make_hashes(maid.tasks.get_filenames(filenames))
-
-
 def _write_to_file(lines, filename, mode):
     if not filename:
         return False
@@ -152,9 +145,11 @@ def _write_to_file(lines, filename, mode):
     return True
 
 
-def update_files(filenames):
-    maid.monitor.time.touch_files(maid.tasks.get_filenames(filenames))
-    maid.monitor.hash.make_hashes(maid.tasks.get_filenames(filenames))
+def update_files(cache, filenames):
+    if cache == CacheType.TIME:
+        maid.monitor.time.touch_files(maid.tasks.get_filenames(filenames))
+    elif cache == CacheType.HASH:
+        maid.monitor.hash.make_hashes(maid.tasks.get_filenames(filenames))
 
 
 def _any_files_missing(filenames, must_exist=True):
@@ -317,6 +312,7 @@ class Task:
         rp = required_tasks if required_tasks else dict()
         self.required_tasks = {t().name: t() for t in rp}
 
+        self._task_cacher = TaskCacher(self)
         self._simple_task = SimpleTask(
                 inputs=inputs,
                 script_stream=script_stream,
@@ -327,9 +323,9 @@ class Task:
         self._outfile = ''
         self._mode = ''
         self._finish_depth_on_failure = finish_depth_on_failure
-        self._dont_run_if_all_targets_exist = dont_run_if_all_targets_exist
-        self._cache = cache
-        self._update_requested = update_requested
+        self.dont_run_if_all_targets_exist = dont_run_if_all_targets_exist
+        self.cache = cache
+        self.update_requested = update_requested
         self._delete_targets_on_error = delete_targets_on_error
         self.maid_name = maid_name
         self.is_default = is_default
@@ -434,11 +430,11 @@ class Task:
                 )
 
         # Won't run so nothing to show.
-        if (should := self._should_run()) and not should[0]:
+        if (isit := self._task_cacher.is_up_to_date()) and isit[0]:
             return ''
 
         if not verbose:
-            return '{}\n{} ({})'.format(output, self.name, should[1])
+            return '{}\n{} ({})'.format(output, self.name, isit[1])
 
         return '''
         \r{previous_tasks}
@@ -449,7 +445,7 @@ class Task:
         '''.format(
                 previous_tasks=output,
                 task_name=self.name,
-                run_reason=should[1],
+                run_reason=isit[1],
                 recipe=str(self),
                 )
         return output
@@ -475,30 +471,6 @@ class Task:
         if error:
             raise error
 
-    def _run_dependencies(tasks, *, delay_throw=False):
-        # Checking that `p.name not in Task._visited` prevents reruning
-        # pipelines that have already run.
-        Task._throw_if_any_fail(
-                Task.run,
-                (t for t in tasks if t.name not in Task._visited),
-                delay_throw=delay_throw,
-                )
-
-    def _stop_early(self):
-        '''
-        Pre-run checks to determine if the task should run.
-        '''
-        # Check files and caches.
-        if not self._should_run()[0]:
-            return True, tuple()
-        # Just update any file that's out of date.
-        if self._update_requested:
-            update_files(self.targets)
-            update_files(self.required_files)
-            return True, tuple()
-
-        return False, tuple()
-
     def _prerun(self):
         '''
         Run functions that the task requires to have finished.
@@ -507,7 +479,12 @@ class Task:
                 self.required_tasks.values(),
                 delay_throw=self._finish_depth_on_failure,
                 )
-        return self._stop_early()
+        if self._task_cacher.is_up_to_date()[0]:
+            return True, tuple()
+        if self.update_requested:
+            self._task_cacher.cache()
+            return True, tuple()
+        return False, ''
 
     def _main_run(self):
         '''
@@ -557,35 +534,58 @@ class Task:
         if (f := _any_files_missing(self.targets)):
             raise maid.exceptions.MissingTargetException(task, f)
 
-        _make_hashes(self._cache, self.targets, self.required_files)
+        self._task_cacher.cache()
 
-    def _should_run(self):
+    def _run_dependencies(tasks, *, delay_throw=False):
+        # Checking that `p.name not in Task._visited` prevents reruning
+        # pipelines that have already run.
+        Task._throw_if_any_fail(
+                Task.run,
+                (t for t in tasks if t.name not in Task._visited),
+                delay_throw=delay_throw,
+                )
+
+
+class TaskCacher:
+
+    def __init__(self, task):
+        self._task = task
+
+    def cache(self):
+        '''
+        '''
+        update_files(self._task.cache, self._task.targets)
+        update_files(self._task.cache, self._task.required_files)
+
+    def is_up_to_date(self):
         '''
         '''
         # Checks based on file existance.
-        if (f := _any_files_missing(self.targets, must_exist=False)):
-            return True, f'missing target `{f}`'
-        if self._dont_run_if_all_targets_exist:
-            return False, ''
+        if (f := _any_files_missing(self._task.targets, must_exist=False)):
+            return False, f'missing target `{f}`'
+        if self._task.dont_run_if_all_targets_exist:
+            return True, ''
 
         # Checks based on cache type.
-        if self._cache == CacheType.NONE:
-            return True, 'uncached task'
-        return self._should_run_cache()
+        if self._task.cache == CacheType.NONE:
+            return False, 'uncached task'
+        return self._is_cached()
 
-    def _should_run_cache(self):
+    def _is_cached(self):
         # Get appropriate decision function.
         should_task_run = maid.monitor.hash.should_task_run
-        if self._cache == CacheType.TIME:
+        if self._task.cache == CacheType.TIME:
             should_task_run = maid.monitor.time.should_task_run
 
-        if should_task_run(self._get_graph())(self.name):
-            return True, 'targets out of date'
-        return False, ''
+        if should_task_run(self._get_graph())(self._task.name):
+            return False, 'targets out of date'
+        return True, ''
 
     def _get_graph(self):
         '''
         '''
+        task = self._task
+
         # This is the graph required for the time and hash cache
         # decision functions.
         graph = {
@@ -594,15 +594,15 @@ class Task:
                     lambda a: a, # This doesn't matter; never runs.
                     targets=p.targets,
                     )
-            for p in self.required_tasks.values()
+            for p in task.required_tasks.values()
         }
-        graph[self.name] = maid.tasks.Task(
-                    self.name,
+        graph[task.name] = maid.tasks.Task(
+                    task.name,
                     lambda a: a, # This doesn't matter; never runs.
-                    targets=self.targets,
-                    required_files=self.required_files,
+                    targets=task.targets,
+                    required_files=task.required_files,
                     required_tasks=tuple(
-                        [p.name for p in self.required_tasks.values()]
+                        [p.name for p in task.required_tasks.values()]
                         ),
                     )
         return graph
