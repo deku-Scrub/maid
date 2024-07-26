@@ -175,6 +175,116 @@ class CacheType(enum.Enum):
     TIME = 2
 
 
+class SimpleTask:
+
+    def __init__(
+            self,
+            *,
+            inputs=tuple(),
+            script_stream=sys.stdout,
+            output_stream=sys.stdout,
+            ):
+        '''
+        '''
+        self._inputs = inputs
+        self._commands = []
+        self._outfile = ''
+        self._mode = ''
+        self._script_stream = script_stream
+        self._output_stream = output_stream
+
+    def append(self, command):
+        '''
+        '''
+        match command:
+            case str():
+                match self._commands:
+                    case []:
+                        self._commands.append(Pipeline())
+                    case list(x) if not isinstance(x[-1], Pipeline):
+                        self._commands.append(Pipeline())
+                self._commands[-1].append(command)
+            case tuple():
+                self._commands.append(command)
+            case x if callable(x):
+                self._commands.append(command)
+            case _:
+                raise maid.exceptions.UnknownCommandTypeException(command)
+
+    def write_to_file(self, filename):
+        SimpleTask._validate_filename(filename)
+        self._outfile = filename
+        self._mode = 'wt'
+
+    def append_to_file(self, filename):
+        SimpleTask._validate_filename(filename)
+        self._outfile = filename
+        self._mode = 'at'
+
+    def _validate_filename(filename):
+        #if self._outfile:
+            #raise maid.exceptions.EndOfTaskError(filename)
+        if not isinstance(filename, str):
+            raise maid.exceptions.InvalidFileTypeException(filename)
+        if not filename:
+            raise maid.exceptions.EmptyOutputFileException()
+
+    def __str__(self):
+        '''
+        Return a string representation of this object's commands.
+        '''
+        commands = '\n'.join(map(str, self._commands)).replace('\n', '\n    | ')
+        append = f'\n    >> {self._outfile}' if self._mode == 'at' else ''
+        truncate = f'\n    > {self._outfile}' if self._mode == 'wt' else ''
+        return '{commands}{truncate}{append}'.format(
+                commands=commands,
+                append=append,
+                truncate=truncate,
+                )
+
+    def run(self):
+        outputs = functools.reduce(
+                self._run_command,
+                self._commands,
+                self._inputs,
+                )
+        self._postrun(outputs)
+        return outputs
+
+    def _run_command(self, inputs, command):
+        _print_scripts(self._script_stream, command)
+        match command:
+            case Pipeline():
+                return command(inputs)
+            case tuple():
+                return command[0](*command[1:], inputs)
+            case _ if callable(command):
+                return map(command, inputs)
+            case _:
+                raise maid.exceptions.UnknownCommandTypeException(command)
+
+    def _postrun(self, outputs):
+        '''
+        Run functions that require the task to have finished.
+        '''
+        if self._outfile:
+            _print_scripts(
+                    self._script_stream,
+                    '{mode} {file}\n'.format(
+                        mode='>' if self._mode.startswith('w') else '>>',
+                        file=self._outfile,
+                        ))
+        if not _write_to_file(outputs, self._outfile, self._mode):
+            if self._output_stream:
+                self._output_stream.writelines(outputs)
+
+
+
+def _print_scripts(outstream, command):
+    if outstream:
+        outstream.write(str(command) + '\n')
+
+
 class Task:
 
     _visited = set()
@@ -203,14 +313,17 @@ class Task:
             update_requested=False, # o
             ):
         self.name = name
-        self.inputs = tuple(inputs) if inputs else tuple()
 
         rp = required_tasks if required_tasks else dict()
         self.required_tasks = {t().name: t() for t in rp}
 
+        self._simple_task = SimpleTask(
+                inputs=inputs,
+                script_stream=script_stream,
+                output_stream=output_stream,
+                )
         self.required_files = tuple(required_files) if required_files else tuple()
         self.targets = tuple(targets) if targets else tuple()
-        self._commands = []
         self._outfile = ''
         self._mode = ''
         self._finish_depth_on_failure = finish_depth_on_failure
@@ -218,8 +331,6 @@ class Task:
         self._cache = cache
         self._update_requested = update_requested
         self._delete_targets_on_error = delete_targets_on_error
-        self._output_stream = output_stream
-        self._script_stream = script_stream
         self.maid_name = maid_name
         self.is_default = is_default
         self.run_phase = run_phase
@@ -251,21 +362,13 @@ class Task:
 
         _ = get_maid(maid_name=maid_name).add_task(self)
 
-    def _validate_filename(filename):
-        if not isinstance(filename, str):
-            raise maid.exceptions.InvalidFileTypeException(filename)
-        if not filename:
-            raise maid.exceptions.EmptyOutputFileException()
-
     def __gt__(self, rhs):
         '''
         Write to file given by `rhs`.
 
         The file is truncated first.
         '''
-        Task._validate_filename(rhs)
-        self._outfile = rhs
-        self._mode = 'wt'
+        self._simple_task.write_to_file(rhs)
         return self
 
     def __rshift__(self, rhs):
@@ -276,43 +379,21 @@ class Task:
         precedence over `|` and results in an error unless everything
         before the `>>` is wrapped in parentheses.
         '''
-        Task._validate_filename(rhs)
-        self._outfile = rhs
-        self._mode = 'at'
+        self._simple_task.append_to_file(rhs)
         return self
 
     def __or__(self, rhs):
         '''
         Add `rhs`'s command to this object's command list.
         '''
-        match rhs:
-            case str():
-                match self._commands:
-                    case []:
-                        self._commands.append(Pipeline())
-                    case list(x) if not isinstance(x[-1], Pipeline):
-                        self._commands.append(Pipeline())
-                self._commands[-1].append(rhs)
-            case tuple():
-                self._commands.append(rhs)
-            case x if callable(x):
-                self._commands.append(rhs)
-            case _:
-                raise maid.exceptions.UnknownCommandTypeException(rhs)
+        self._simple_task.append(rhs)
         return self
 
     def __str__(self):
         '''
-        Return a string representation of this object's pipeline.
+        Return a string representation of this object's commands.
         '''
-        commands = '\n'.join(map(str, self._commands)).replace('\n', '\n    | ')
-        append = f'\n    >> {self._outfile}' if self._mode == 'at' else ''
-        truncate = f'\n    > {self._outfile}' if self._mode == 'wt' else ''
-        return '{commands}{truncate}{append}'.format(
-                commands=commands,
-                append=append,
-                truncate=truncate,
-                )
+        return str(self._simple_task)
 
     def _wrap_visited(f, task_name):
         '''
@@ -325,7 +406,7 @@ class Task:
         except Exception as err:
             raise err
         finally:
-            # Clear visited list once the pipeline has finished
+            # Clear visited list once the task has finished
             # so that other pipelines can run correctly.
             if is_root:
                 Task._visited.clear()
@@ -362,7 +443,7 @@ class Task:
         return '''
         \r{previous_tasks}
         \r########################################
-        \r# Pipeline `{task_name}` will run due to {run_reason}
+        \r# Task `{task_name}` will run due to {run_reason}
         \r{recipe}
         \r########################################
         '''.format(
@@ -373,13 +454,9 @@ class Task:
                 )
         return output
 
-    def _print_scripts(outstream, command):
-        if outstream:
-            outstream.write(str(command) + '\n')
-
     def run(self):
         '''
-        Run pipeline.
+        Run task.
         '''
         return Task._wrap_visited(self._run, self.name)
 
@@ -409,7 +486,7 @@ class Task:
 
     def _stop_early(self):
         '''
-        Pre-run checks to determine if the pipeline should run.
+        Pre-run checks to determine if the task should run.
         '''
         # Check files and caches.
         if not self._should_run()[0]:
@@ -424,7 +501,7 @@ class Task:
 
     def _prerun(self):
         '''
-        Run functions that the pipeline requires to have finished.
+        Run functions that the task requires to have finished.
         '''
         Task._run_dependencies(
                 self.required_tasks.values(),
@@ -432,21 +509,9 @@ class Task:
                 )
         return self._stop_early()
 
-    def _run_command(inputs, command, outstream=sys.stdout):
-        Task._print_scripts(outstream, command)
-        match command:
-            case Pipeline():
-                return command(inputs)
-            case tuple():
-                return command[0](*command[1:], inputs)
-            case _ if callable(command):
-                return map(command, inputs)
-            case _:
-                raise maid.exceptions.UnknownCommandTypeException(command)
-
     def _main_run(self):
         '''
-        Logic for running the pipeline.
+        Logic for running the task.
         '''
         # TODO: When independent targets is enabled, the task
         # probably should end in `>`.  Doesn't make sense to have
@@ -462,11 +527,7 @@ class Task:
                     )
             return tuple()
         else:
-            return functools.reduce(
-                    lambda i, c: Task._run_command(i, c, self._script_stream),
-                    self._commands,
-                    self.inputs,
-                    )
+            return self._simple_task.run()
 
     def _run(self):
         '''
@@ -483,7 +544,7 @@ class Task:
                 self._postrun(outputs)
             return outputs
         except Exception as err:
-            msg = 'Error running pipeline `{}`: {}'.format(self.name, err)
+            msg = 'Error running task `{}`: {}'.format(self.name, err)
             maid.error_utils.remove_files_and_throw(
                     maid.tasks.get_filenames(self.targets) if self._delete_targets_on_error else [],
                     Exception(msg),
@@ -491,19 +552,8 @@ class Task:
 
     def _postrun(self, outputs):
         '''
-        Run functions that require the pipeline to have finished.
+        Run functions that require the task to have finished.
         '''
-        if self._outfile:
-            Task._print_scripts(
-                    self._script_stream,
-                    '{} {}\n'.format(
-                        '>' if self._mode.startswith('w') else '>>',
-                        self._outfile,
-                        ))
-        if not _write_to_file(outputs, self._outfile, self._mode):
-            if self._output_stream:
-                self._output_stream.writelines(outputs)
-
         if (f := _any_files_missing(self.targets)):
             raise maid.exceptions.MissingTargetException(task, f)
 
@@ -520,7 +570,7 @@ class Task:
 
         # Checks based on cache type.
         if self._cache == CacheType.NONE:
-            return True, 'uncached pipeline'
+            return True, 'uncached task'
         return self._should_run_cache()
 
     def _should_run_cache(self):
@@ -633,7 +683,7 @@ a = Task(inputs=(j for j in range(100))) \
 #  | (lambda x: joblib.Parallel()(joblib.delayed(f)(xj) for xj in x),)
 # ```
 print(a.dry_run(True))
-print('pipeline output: {}'.format(list(a.run())))
+print('task output: {}'.format(list(a.run())))
 
 # example from https://github.com/pytoolz/toolz
 import collections
