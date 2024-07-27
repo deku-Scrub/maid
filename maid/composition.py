@@ -3,24 +3,11 @@ import itertools
 import functools
 import sys
 import subprocess
+from typing import Optional, Any, Iterable, IO, Callable, Final, Self
 
 import maid.exceptions
 import maid.cache
 import maid.files
-
-
-def _print_scripts(outstream, command):
-    if outstream:
-        outstream.write(str(command) + '\n')
-
-
-def _write_to_file(lines, filename, mode):
-    if not filename:
-        return False
-
-    with open(filename, mode=mode) as fos:
-        fos.writelines(lines)
-    return True
 
 
 class RunPhase(enum.Enum):
@@ -35,12 +22,12 @@ class ShellPipeline:
     '''
 
     def __init__(self):
-        self._commands = []
+        self._commands: list = []
 
-    def append(self, cmd):
+    def append(self, cmd: str) -> None:
         self._commands.append(cmd)
 
-    def _make_process(cmd, stdin):
+    def _make_process(cmd: str, stdin: IO) -> subprocess.Popen:
         '''
         Make process with the necessary common parameters.
         '''
@@ -52,10 +39,10 @@ class ShellPipeline:
                 text=True,
                 )
 
-    def __str__(self):
+    def __str__(self) -> str:
         return '\n'.join(self._commands)
 
-    def __call__(self, inputs=None):
+    def __call__[I, O](self, inputs: Optional[Iterable[I]] = None) -> Iterable[O]:
         # Hook up command outputs to inputs.
         processes = list(itertools.accumulate(
                 self._commands[1:],
@@ -75,23 +62,23 @@ class ShellPipeline:
 
 class SimpleTask:
 
-    def __init__(
+    def __init__[T](
             self,
             *,
-            inputs=tuple(),
-            script_stream=sys.stdout,
-            output_stream=sys.stdout,
+            inputs: tuple[T] = tuple(),
+            script_stream: IO = sys.stdout,
+            output_stream: IO = sys.stdout,
             ):
         '''
         '''
-        self._inputs = inputs
-        self._commands = []
-        self._outfile = ''
-        self._mode = ''
-        self._script_stream = script_stream
-        self._output_stream = output_stream
+        self._inputs: Final[tuple[T]] = inputs
+        self._commands: Final[list[ShellPipeline | Callable[[Any], Any]]] = []
+        self._outfile: str = ''
+        self._mode: str = ''
+        self._script_stream: Final[IO] = script_stream
+        self._output_stream: Final[IO] = output_stream
 
-    def append(self, command):
+    def append(self, command: str | tuple | Callable[[Any], Any]) -> None:
         '''
         '''
         match command:
@@ -109,17 +96,17 @@ class SimpleTask:
             case _:
                 raise maid.exceptions.UnknownCommandTypeException(command)
 
-    def write_to_file(self, filename):
+    def write_to_file(self, filename: str) -> None:
         SimpleTask._validate_filename(filename)
         self._outfile = filename
         self._mode = 'wt'
 
-    def append_to_file(self, filename):
+    def append_to_file(self, filename: str) -> None:
         SimpleTask._validate_filename(filename)
         self._outfile = filename
         self._mode = 'at'
 
-    def _validate_filename(filename):
+    def _validate_filename(filename: str) -> None:
         #if self._outfile:
             #raise maid.exceptions.EndOfTaskError(filename)
         if not isinstance(filename, str):
@@ -127,7 +114,7 @@ class SimpleTask:
         if not filename:
             raise maid.exceptions.EmptyOutputFileException()
 
-    def __str__(self):
+    def __str__(self) -> str:
         '''
         Return a string representation of this object's commands.
         '''
@@ -140,7 +127,7 @@ class SimpleTask:
                 truncate=truncate,
                 )
 
-    def run(self):
+    def run[T](self) -> Iterable[T]:
         outputs = functools.reduce(
                 self._run_command,
                 self._commands,
@@ -149,7 +136,11 @@ class SimpleTask:
         self._postrun(outputs)
         return outputs
 
-    def _run_command(self, inputs, command):
+    def _run_command[I, O](
+            self,
+            inputs: Iterable[I],
+            command: ShellPipeline | tuple | Callable[[I], O]
+            ) -> Iterable[O]:
         _print_scripts(self._script_stream, command)
         match command:
             case ShellPipeline():
@@ -161,7 +152,7 @@ class SimpleTask:
             case _:
                 raise maid.exceptions.UnknownCommandTypeException(command)
 
-    def _postrun(self, outputs):
+    def _postrun[T](self, outputs: Iterable[T]) -> None:
         '''
         Run functions that require the task to have finished.
         '''
@@ -181,56 +172,56 @@ class Task:
 
     _visited = set()
 
-    def __init__(
+    def __init__[T](
             self,
-            name='', # o
+            name: str = '', # o
             *,
             # Maid exclusive.
-            maid_name=maid.DEFAULT_MAID_NAME, # o
-            run_phase=RunPhase.NORMAL, # o
-            is_default=False, # o
+            maid_name: str =  '', # o
+            run_phase: RunPhase = RunPhase.NORMAL, # o
+            is_default: bool = False, # o
             # Task exclusive.
-            inputs=None, # o
-            required_tasks=None, # o
-            required_files=None, # o
-            targets=None, # o
-            cache=maid.cache.CacheType.NONE, # o
-            independent_targets_creator=None,
-            script_stream=None, # o
-            output_stream=None, # o
-            delete_targets_on_error=True, #o
-            dont_run_if_all_targets_exist=False, # o
-            description='',
-            finish_depth_on_failure=False, # o
-            update_requested=False, # o
+            inputs: Optional[Iterable[T]] = None, # o
+            required_tasks: Optional[Iterable[str]] = None, # o
+            required_files: Optional[Iterable[str]] = None, # o
+            targets: Optional[Iterable[str]] = None, # o
+            cache: maid.cache.CacheType = maid.cache.CacheType.NONE, # o
+            build_task: Optional[Callable[[Self], None]] = None,
+            script_stream: IO = None, # o
+            output_stream: IO = None, # o
+            delete_targets_on_error: bool = True, #o
+            dont_run_if_all_targets_exist: bool = False, # o
+            description: str = '',
+            finish_depth_on_failure: bool = False, # o
+            update_requested: bool = False, # o
             ):
         self.name = name
 
         rp = required_tasks if required_tasks else dict()
-        self.required_tasks = {t().name: t() for t in rp}
+        self.required_tasks: Final[dict[str, Self]] = {t().name: t() for t in rp}
 
-        self._task_cacher = maid.cache.TaskCacher(self)
-        self._simple_task = SimpleTask(
+        self._task_cacher: Final[maid.cache.TaskCacher] = maid.cache.TaskCacher(self)
+        self._simple_task: Final[SimpleTask] = SimpleTask(
                 inputs=inputs,
                 script_stream=script_stream,
                 output_stream=output_stream,
                 )
-        self.required_files = tuple(required_files) if required_files else tuple()
-        self.targets = tuple(targets) if targets else tuple()
-        self._outfile = ''
-        self._mode = ''
-        self._finish_depth_on_failure = finish_depth_on_failure
-        self.dont_run_if_all_targets_exist = dont_run_if_all_targets_exist
-        self.cache = cache
-        self.update_requested = update_requested
-        self._delete_targets_on_error = delete_targets_on_error
-        self.maid_name = maid_name
-        self.is_default = is_default
-        self.run_phase = run_phase
+        self.required_files: Final[tuple[str]] = tuple(required_files) if required_files else tuple()
+        self.targets: Final[tuple[str]] = tuple(targets) if targets else tuple()
+        self._outfile: str = ''
+        self._mode: str = ''
+        self._finish_depth_on_failure: Final[bool] = finish_depth_on_failure
+        self.dont_run_if_all_targets_exist: Final[bool] = dont_run_if_all_targets_exist
+        self.cache: Final[maid.cache.CacheType] = cache
+        self.update_requested: Final[bool] = update_requested
+        self._delete_targets_on_error: Final[bool] = delete_targets_on_error
+        self.maid_name: Final[str] = maid_name
+        self.is_default: Final[bool] = is_default
+        self.run_phase: Final[RunPhase] = run_phase
 
-        self._get_independent_task = None
-        if independent_targets_creator:
-            def f(target):
+        self._get_independent_task: Optional[Callable[[str], Self]] = None
+        if build_task:
+            def f(target: str) -> Self:
                 # Makes several assumptions:
                 #   * the empty `name` prevents querying maid.
                 #   * the lack of `required_tasks` skips running
@@ -241,7 +232,7 @@ class Task:
                     required_files=required_files,
                     targets=[target],
                     cache=cache,
-                    independent_targets_creator=None,
+                    build_task=None,
                     script_stream=script_stream,
                     output_stream=output_stream,
                     delete_targets_on_error=delete_targets_on_error,
@@ -249,13 +240,11 @@ class Task:
                     finish_depth_on_failure=finish_depth_on_failure,
                     update_requested=update_requested,
                 )
-                independent_targets_creator(a)
+                build_task(a)
                 return a
             self._get_independent_task = f
 
-        _ = maid.get_maid(maid_name=maid_name).add_task(self)
-
-    def __gt__(self, rhs):
+    def __gt__(self, rhs: Any) -> Self:
         '''
         Write to file given by `rhs`.
 
@@ -264,7 +253,7 @@ class Task:
         self._simple_task.write_to_file(rhs)
         return self
 
-    def __rshift__(self, rhs):
+    def __rshift__(self, rhs: Any) -> Self:
         '''
         Append to file given by `rhs`.
 
@@ -275,20 +264,20 @@ class Task:
         self._simple_task.append_to_file(rhs)
         return self
 
-    def __or__(self, rhs):
+    def __or__[I, O](self, rhs: str | tuple | Callable[[I], O]) -> Self:
         '''
         Add `rhs`'s command to this object's command list.
         '''
         self._simple_task.append(rhs)
         return self
 
-    def __str__(self):
+    def __str__(self) -> str:
         '''
         Return a string representation of this object's commands.
         '''
         return str(self._simple_task)
 
-    def _wrap_visited(f, task_name):
+    def _wrap_visited[T](f: Callable[[], T], task_name: str) -> T:
         '''
         Reset visited after running f.
         '''
@@ -304,14 +293,14 @@ class Task:
             if is_root:
                 Task._visited.clear()
 
-    def _get_required_dry_runs(tasks, verbose):
+    def _get_required_dry_runs(tasks: Iterable[Self], verbose: bool) -> str:
         return lambda: '\n'.join(
             t.dry_run(verbose)
             for t in tasks
             if t.name not in Task._visited
             )
 
-    def dry_run(self, verbose=False):
+    def dry_run(self, verbose: bool = False) -> str:
         '''
         Return a string containing all steps that a call to `run`
         would execute.
@@ -347,14 +336,19 @@ class Task:
                 )
         return output
 
-    def run(self):
+    def run[T](self) -> Iterable[T]:
         '''
         Run task.
         '''
         return Task._wrap_visited(self._run, self.name)
 
-    def _throw_if_any_fail(f, iterable, *, delay_throw=False):
-        error = None
+    def _throw_if_any_fail[T](
+            f: Callable[[T], None],
+            iterable: Iterable[T],
+            *,
+            delay_throw: bool = False,
+            ) -> None:
+        error: Exception = None
         for val in iterable:
             try:
                 f(val)
@@ -368,7 +362,7 @@ class Task:
         if error:
             raise error
 
-    def _prerun(self):
+    def _prerun(self) -> tuple[bool, str]:
         '''
         Run functions that the task requires to have finished.
         '''
@@ -383,7 +377,7 @@ class Task:
             return True, tuple()
         return False, ''
 
-    def _main_run(self):
+    def _main_run[T](self) -> Iterable[T]:
         '''
         Logic for running the task.
         '''
@@ -403,7 +397,7 @@ class Task:
         else:
             return self._simple_task.run()
 
-    def _run(self):
+    def _run[T](self) -> Iterable[T]:
         '''
         Execute the pre-, main-, and post-run stages.
         '''
@@ -415,7 +409,7 @@ class Task:
             # independent tasks.  Doing it again would cause
             # errors, particularly overwriting files.
             if not self._get_independent_task:
-                self._postrun(outputs)
+                self._postrun()
             return outputs
         except Exception as err:
             msg = 'Error running task `{}`: {}'.format(self.name, err)
@@ -424,7 +418,7 @@ class Task:
                     Exception(msg),
                     )
 
-    def _postrun(self, outputs):
+    def _postrun(self) -> None:
         '''
         Run functions that require the task to have finished.
         '''
@@ -433,7 +427,11 @@ class Task:
 
         self._task_cacher.cache_targets()
 
-    def _run_dependencies(tasks, *, delay_throw=False):
+    def _run_dependencies(
+            tasks: Iterable[Self],
+            *,
+            delay_throw: bool = False,
+            ) -> None:
         # Checking that `p.name not in Task._visited` prevents reruning
         # pipelines that have already run.
         Task._throw_if_any_fail(
@@ -441,3 +439,20 @@ class Task:
                 (t for t in tasks if t.name not in Task._visited),
                 delay_throw=delay_throw,
                 )
+
+
+def _print_scripts[I, O](
+        outstream: IO,
+        command: ShellPipeline | tuple | Callable[[I], O],
+        ) -> None:
+    if outstream:
+        outstream.write(str(command) + '\n')
+
+
+def _write_to_file(lines: Iterable[str], filename: str, mode: str) -> None:
+    if not filename:
+        return False
+
+    with open(filename, mode=mode) as fos:
+        fos.writelines(lines)
+    return True

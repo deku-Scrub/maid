@@ -1,31 +1,32 @@
 import itertools
 import sys
+from typing import Iterable, Final, IO, Callable
 
 import maid.cache
+import maid.composition
+import maid.exceptions
 
-DEFAULT_MAID_NAME = 'm0'
-_maids = dict()
-
-
-def get_maid(maid_name=DEFAULT_MAID_NAME):
-    if not maid_name:
-        raise maid.exceptions.MaidNameException()
-    return _maids.setdefault(maid_name, _Maid(maid_name))
+DEFAULT_MAID_NAME: str = 'm0'
+_maids: dict = dict()
 
 
 class _Maid:
     '''
     '''
 
-    def __init__(self, name):
-        self.name = name
-        self._default_task = None
-        self._tasks = dict()
-        self._start_tasks = dict()
-        self._end_tasks = dict()
-        self._finally_tasks = dict()
+    def __init__(self, name: str):
+        self.name: Final[str] = name
+        self._default_task: maid.composition.Task = None
+        self._tasks: dict[str, maid.composition.Task] = dict()
+        self._start_tasks: dict[str, maid.composition.Task] = dict()
+        self._end_tasks: dict[str, maid.composition.Task] = dict()
+        self._finally_tasks: dict[str, maid.composition.Task] = dict()
 
-    def dry_run(self, task_name='', verbose=False):
+    def dry_run(
+            self,
+            task_name: str = '',
+            verbose: bool = False,
+            ) -> str:
         tasks = itertools.chain(
                 self._start_tasks.values(),
                 (self._get_task(task_name),),
@@ -34,12 +35,16 @@ class _Maid:
                 )
         return '\n'.join(map(lambda t: t.dry_run(verbose), tasks))
 
-    def _run(self, tasks, capture_outputs=True):
-        outputs = map(maid.Task.run, tasks)
+    def _run[T](
+            self,
+            tasks: Iterable[maid.composition.Task],
+            capture_outputs: bool = True,
+            ) -> Iterable[T]:
+        outputs = map(maid.composition.Task.run, tasks)
         empty_iter = filter(lambda _: False, outputs)
         return outputs if capture_outputs else list(empty_iter)
 
-    def run(self, task_name=''):
+    def run[T](self, task_name: str = '') -> Iterable[T]:
         try:
             _ = self._run(self._start_tasks.values(), capture_outputs=False)
             return next(self._run([self._get_task(task_name)]))
@@ -48,29 +53,29 @@ class _Maid:
         finally:
             _ = self._run(self._finally_tasks.values(), capture_outputs=False)
 
-    def _get_task(self, task_name):
+    def _get_task(self, task_name: str) -> maid.composition.Task:
         if task_name in self._tasks:
             return self._tasks[task_name]
         if self._default_task:
             return self._default_task
         raise maid.exceptions.UnknownTaskException(task)
 
-    def add_task(self, task):
+    def add_task(self, task: maid.composition.Task) -> bool:
         '''
         Add a task.
 
         If the task name is empty, it will not be added.
         '''
         match task:
-            case maid.Task(name=''):
+            case maid.composition.Task(name=''):
                 return False
-            case maid.Task(name=x) if x in self._tasks:
+            case maid.composition.Task(name=x) if x in self._tasks:
                 raise maid.exceptions.DuplicateTaskException(task)
-            case maid.Task(is_default=True) if self._default_task:
+            case maid.composition.Task(is_default=True) if self._default_task:
                 raise maid.exceptions.DuplicateTaskException(task)
-            case maid.Task(is_default=True, run_phase=x) if x != maid.RunPhase.NORMAL:
+            case maid.composition.Task(is_default=True, run_phase=x) if x != maid.RunPhase.NORMAL:
                 raise maid.exceptions.DefaultTaskRunPhaseException(task)
-            case maid.Task(is_default=True):
+            case maid.composition.Task(is_default=True):
                 self._default_task = task
 
         match task.run_phase:
@@ -86,34 +91,49 @@ class _Maid:
         return True
 
 
-def task(
-        name,
-        inputs=None,
-        required_files=tuple(),
-        required_tasks=tuple(),
-        targets=tuple(),
-        cache=maid.cache.CacheType.NONE,
-        output_stream=sys.stdout,
-        script_stream=sys.stderr,
-        independent_targets=False,
-        is_default=False,
-        ):
+def task[T](
+        name: str,
+        maid_name: str = DEFAULT_MAID_NAME,
+        inputs: Iterable[T] = None,
+        required_files: Iterable = tuple(),
+        required_tasks: Iterable = tuple(),
+        targets: tuple = tuple(),
+        cache: maid.cache.CacheType = maid.cache.CacheType.NONE,
+        output_stream: IO = sys.stdout,
+        script_stream: IO = sys.stderr,
+        independent_targets: bool = False,
+        is_default: bool = False,
+        ) -> Callable[
+            [Callable[[maid.composition.Task], None]],
+            Callable[[], maid.composition.Task]
+        ]:
 
-    def build_task(define_commands):
-        t = maid.Task(
+    def build_task(
+            define_commands: Callable[[maid.composition.Task], None]
+            ) -> Callable[[], maid.composition.Task]:
+        t = maid.composition.Task(
                 name,
+                maid_name=maid_name,
                 inputs=inputs,
                 required_files=required_files,
                 targets=targets,
                 cache=cache,
                 is_default=is_default,
-                independent_targets_creator=define_commands if independent_targets else None,
+                build_task=define_commands if independent_targets else None,
                 required_tasks=required_tasks,
                 output_stream=output_stream,
                 script_stream=script_stream,
                 )
         # Let `define_commands` immediately create commands for the task.
         define_commands(t)
+        _ = get_maid(maid_name=maid_name).add_task(t)
+
         return lambda: t
 
     return build_task
+
+
+def get_maid(maid_name: str = DEFAULT_MAID_NAME) -> _Maid:
+    if not maid_name:
+        raise maid.exceptions.MaidNameException()
+    return _maids.setdefault(maid_name, _Maid(maid_name))
