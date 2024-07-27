@@ -3,7 +3,7 @@ from typing import Self, Optional, Iterable
 
 class DependecyGraphTask:
 
-    def __init__[T](
+    def __init__(
             self,
             name: str = '', # o
             *,

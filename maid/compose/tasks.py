@@ -27,6 +27,7 @@ class ShellPipeline:
     def append(self, cmd: str) -> None:
         self._commands.append(cmd)
 
+    @staticmethod
     def _make_process(cmd: str, stdin: IO) -> subprocess.Popen:
         '''
         Make process with the necessary common parameters.
@@ -106,6 +107,7 @@ class SimpleTask:
         self._outfile = filename
         self._mode = 'at'
 
+    @staticmethod
     def _validate_filename(filename: str) -> None:
         #if self._outfile:
             #raise EndOfTaskError(filename)
@@ -279,6 +281,7 @@ class Task(maid.compose.base.DependecyGraphTask):
         '''
         return str(self._simple_task)
 
+    @staticmethod
     def _wrap_visited[T](f: Callable[[], T], task_name: str) -> T:
         '''
         Reset visited after running f.
@@ -295,6 +298,7 @@ class Task(maid.compose.base.DependecyGraphTask):
             if is_root:
                 Task._visited.clear()
 
+    @staticmethod
     def _get_required_dry_runs(tasks: Iterable[Self], verbose: bool) -> str:
         return lambda: '\n'.join(
             t.dry_run(verbose)
@@ -336,7 +340,6 @@ class Task(maid.compose.base.DependecyGraphTask):
                 run_reason=isit[1],
                 recipe=str(self),
                 )
-        return output
 
     def run[T](self) -> Iterable[T]:
         '''
@@ -344,6 +347,7 @@ class Task(maid.compose.base.DependecyGraphTask):
         '''
         return Task._wrap_visited(self._run, self.name)
 
+    @staticmethod
     def _throw_if_any_fail[T](
             f: Callable[[T], None],
             iterable: Iterable[T],
@@ -396,8 +400,7 @@ class Task(maid.compose.base.DependecyGraphTask):
                     delay_throw=self._finish_depth_on_failure,
                     )
             return tuple()
-        else:
-            return self._simple_task.run()
+        return self._simple_task.run()
 
     def _run[T](self) -> Iterable[T]:
         '''
@@ -425,10 +428,11 @@ class Task(maid.compose.base.DependecyGraphTask):
         Run functions that require the task to have finished.
         '''
         if (f := maid.cache.cacher.any_files_missing(self.targets)):
-            raise MissingTargetException(task, f)
+            raise MissingTargetException(self.name, f)
 
         self._task_cacher.cache_targets()
 
+    @staticmethod
     def _run_dependencies(
             tasks: Iterable[Self],
             *,
@@ -469,10 +473,10 @@ class MissingTargetException(Exception):
     '''
     '''
 
-    def __init__(self, task: Task, filename: str):
+    def __init__(self, task_name: str, filename: str):
         '''
         '''
-        msg = 'Task `{task}` ran without error but did not create expected files: `{filename}` not found.'.format(task=task.name, filename=filename)
+        msg = 'Task `{task}` ran without error but did not create expected files: `{filename}` not found.'.format(task=task_name, filename=filename)
         super().__init__(msg)
 
 
