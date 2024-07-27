@@ -1,8 +1,10 @@
 import enum
 import os
+from typing import Iterable, Final
 
 import maid.cache.filehash
 import maid.cache.timestamp
+import maid.compose.base
 import maid.files
 
 
@@ -14,10 +16,10 @@ class CacheType(enum.Enum):
 
 class TaskCacher:
 
-    def __init__(self, task):
-        self._task = task
+    def __init__(self, task: maid.compose.base.DependecyGraphTask):
+        self._task: Final[maid.compose.base.DependecyGraphTask] = task
 
-    def cache_targets(self):
+    def cache_targets(self) -> None:
         '''
         '''
         if self._task.cache == CacheType.HASH:
@@ -27,11 +29,11 @@ class TaskCacher:
         elif self._task.cache == CacheType.TIME:
             _update_files(self._task.cache, self._task.targets)
 
-    def cache_all(self):
+    def cache_all(self) -> None:
         _update_files(self._task.cache, self._task.required_files)
         _update_files(self._task.cache, self._task.targets)
 
-    def is_up_to_date(self):
+    def is_up_to_date(self) -> tuple[bool, str]:
         '''
         '''
         # Checks based on file existance.
@@ -45,7 +47,7 @@ class TaskCacher:
             return False, 'uncached task'
         return self._is_cached()
 
-    def _is_cached(self):
+    def _is_cached(self) -> tuple[bool, str]:
         # Get appropriate decision function.
         should_task_run = maid.cache.filehash.should_task_run
         if self._task.cache == CacheType.TIME:
@@ -56,13 +58,16 @@ class TaskCacher:
         return True, ''
 
 
-def _update_files(cache, filenames):
+def _update_files(cache: CacheType, filenames: Iterable[str]) -> None:
     if cache == CacheType.TIME:
         maid.cache.timestamp.touch_files(maid.files.get_filenames(filenames))
     elif cache == CacheType.HASH:
         maid.cache.filehash.make_hashes(maid.files.get_filenames(filenames))
 
 
-def any_files_missing(filenames, must_exist=True):
+def any_files_missing(
+        filenames: Iterable[str],
+        must_exist: bool = True,
+        ) -> str:
     filenames = maid.files.get_filenames(filenames, must_exist=must_exist)
     return next((f for f in filenames if not os.path.exists(f)), '')

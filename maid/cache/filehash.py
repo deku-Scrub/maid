@@ -3,8 +3,10 @@ import hashlib
 import os
 import base64
 import time
+from typing import Iterable
 
 import maid.files
+import maid.compose.base
 
 
 # TODO: make this a config value.
@@ -12,7 +14,7 @@ index_dir = os.path.join('.maid', 'index')
 os.makedirs(index_dir, exist_ok=True)
 
 
-def make_hashes(filenames):
+def make_hashes(filenames: Iterable[str]) -> None:
     for filename in filenames:
         if not _is_hash_changed(filename):
             continue
@@ -24,7 +26,7 @@ def make_hashes(filenames):
         pathlib.Path(filename_b64).write_text(text)
 
 
-def _get_file_hash(filename):
+def _get_file_hash(filename: str) -> str:
     file_hash = ''
     with open(filename, mode='rb') as fis:
         hash_algo = hashlib.md5()
@@ -35,21 +37,21 @@ def _get_file_hash(filename):
 
 
 # TODO: set a global config for `encoding`.
-def _get_b64_filename(filename, encoding='utf-8'):
+def _get_b64_filename(filename: str, encoding: str = 'utf-8') -> str:
     return os.path.join(
             index_dir,
             base64.b64encode(filename.encode(encoding)).decode(encoding),
             )
 
 
-def _hash_exists(filename):
+def _hash_exists(filename: str) -> str:
     filename_b64 = _get_b64_filename(filename)
     if os.path.exists(filename) and os.path.exists(filename_b64):
         return filename_b64
     return ''
 
 
-def _is_hash_changed(filename, must_exist=True):
+def _is_hash_changed(filename: str, must_exist: bool = True) -> bool:
     '''
     Checks if a file's hash has changed from its stored hash.
 
@@ -70,19 +72,21 @@ def _is_hash_changed(filename, must_exist=True):
     return file_hash != stored_hash
 
 
-def _get_hash_creation_time(filename):
+def _get_hash_creation_time(filename: str) -> int:
     if (filename_b64 := _hash_exists(filename)):
         return int(pathlib.Path(filename_b64).read_text().split()[1])
     return 0
 
 
-def _is_newer(filename, timestamp):
+def _is_newer(filename: str, timestamp: int) -> bool:
     '''
     '''
     return _get_hash_creation_time(filename) > timestamp
 
 
-def should_task_run(task):
+def should_task_run(
+        task: maid.compose.base.DependecyGraphTask
+        ) -> tuple[str, str]:
     oldest_time = float('inf')
     # If any outputs or their hashes don't exist, the task should run.
     for f in maid.files.get_filenames(task.targets):
@@ -97,11 +101,11 @@ def should_task_run(task):
 
     # If any outputs of required tasks have a new hash, the
     # task should run.
-    for req in task.required_tasks:
+    for req_name, req in task.required_tasks.items():
         for f in maid.files.get_filenames(req.targets):
             if _is_hash_changed(f, must_exist=False):
-                return (req, '')
+                return (req_name, '')
             if _is_newer(f, oldest_time):
-                return (req, '')
+                return (req_name, '')
 
     return tuple()
