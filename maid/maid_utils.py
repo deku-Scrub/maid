@@ -1,5 +1,4 @@
 import itertools
-import sys
 from typing import Iterable, Final
 
 import maid.compose.tasks
@@ -56,7 +55,7 @@ class _Maid:
             return self._tasks[task_name]
         if self._default_task:
             return self._default_task
-        raise UnknownTaskException(task)
+        raise UnknownTaskException(task_name, self.name)
 
     def add_task(self, task: maid.compose.tasks.Task) -> bool:
         '''
@@ -121,12 +120,12 @@ class DuplicateTaskException(Exception):
 
 class UnknownTaskException(Exception):
 
-    def __init__(self, task: maid.compose.tasks.Task):
+    def __init__(self, task_name: str, maid_name: str):
         '''
         '''
         msg = 'Unknown task.  Maid `{}` has no task named `{}`'.format(
-                    task.maid_name,
-                    task.name,
+                    maid_name,
+                    task_name,
                     )
         super().__init__(msg)
 

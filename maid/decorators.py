@@ -1,14 +1,14 @@
 from typing import Iterable, IO, Callable
 import sys
 
-import maid
+import maid.maid_utils
 import maid.cache
 import maid.compose.tasks
 
 
 def task[T](
         name: str,
-        maid_name: str = maid.DEFAULT_MAID_NAME,
+        maid_name: str = maid.maid_utils.DEFAULT_MAID_NAME,
         inputs: Iterable[T] = None,
         required_files: Iterable = tuple(),
         required_tasks: Iterable = tuple(),
@@ -41,10 +41,8 @@ def task[T](
                 )
         # Let `define_commands` immediately create commands for the task.
         define_commands(t)
-        _ = maid.get_maid(maid_name=maid_name).add_task(t)
+        _ = maid.maid_utils.get_maid(maid_name=maid_name).add_task(t)
 
         return lambda: t
 
     return build_task
-
-

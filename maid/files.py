@@ -24,5 +24,3 @@ def get_filenames(
                 raise FileNotFoundError('Required file not found: {}'.format(f))
             if (not has_files) and (not must_exist):
                 yield f
-
-
