@@ -4,7 +4,6 @@ from typing import Iterable, Final, IO, Callable
 
 import maid.cache
 import maid.composition
-import maid.exceptions
 
 DEFAULT_MAID_NAME: str = 'm0'
 _maids: dict = dict()
@@ -58,7 +57,7 @@ class _Maid:
             return self._tasks[task_name]
         if self._default_task:
             return self._default_task
-        raise maid.exceptions.UnknownTaskException(task)
+        raise UnknownTaskException(task)
 
     def add_task(self, task: maid.composition.Task) -> bool:
         '''
@@ -70,11 +69,11 @@ class _Maid:
             case maid.composition.Task(name=''):
                 return False
             case maid.composition.Task(name=x) if x in self._tasks:
-                raise maid.exceptions.DuplicateTaskException(task)
+                raise DuplicateTaskException(task)
             case maid.composition.Task(is_default=True) if self._default_task:
-                raise maid.exceptions.DuplicateTaskException(task)
+                raise DuplicateTaskException(task)
             case maid.composition.Task(is_default=True, run_phase=x) if x != maid.RunPhase.NORMAL:
-                raise maid.exceptions.DefaultTaskRunPhaseException(task)
+                raise DefaultTaskRunPhaseException(task)
             case maid.composition.Task(is_default=True):
                 self._default_task = task
 
@@ -135,5 +134,50 @@ def task[T](
 
 def get_maid(maid_name: str = DEFAULT_MAID_NAME) -> _Maid:
     if not maid_name:
-        raise maid.exceptions.MaidNameException()
+        raise MaidNameException()
     return _maids.setdefault(maid_name, _Maid(maid_name))
+
+
+class DefaultTaskRunPhaseException(Exception):
+
+    def __init__(self, task: maid.composition.Task):
+        '''
+        '''
+        msg = 'Only pipelines in the `NORMAL` run phase can be a default; was given `{}` for task `{}`.'.format(
+            task.run_phase,
+            task.name,
+            )
+        super().__init__(msg)
+
+
+class DuplicateTaskException(Exception):
+
+    def __init__(self, task: maid.composition.Task):
+        '''
+        '''
+        msg = 'Maid `{}` already has task named `{}`.'.format(
+                    task.maid_name,
+                    task.name,
+                    )
+        super().__init__(msg)
+
+
+class UnknownTaskException(Exception):
+
+    def __init__(self, task: maid.composition.Task):
+        '''
+        '''
+        msg = 'Unknown task.  Maid `{}` has no task named `{}`'.format(
+                    task.maid_name,
+                    task.name,
+                    )
+        super().__init__(msg)
+
+
+class MaidNameException(Exception):
+
+    def __init__(self):
+        '''
+        '''
+        msg = 'Maid name must not be empty.'
+        super().__init__(msg)
