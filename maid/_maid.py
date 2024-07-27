@@ -1,6 +1,7 @@
 import itertools
+import sys
 
-import maid
+import maid.cache
 
 DEFAULT_MAID_NAME = 'm0'
 _maids = dict()
@@ -84,3 +85,35 @@ class _Maid:
 
         return True
 
+
+def task(
+        name,
+        inputs=None,
+        required_files=tuple(),
+        required_tasks=tuple(),
+        targets=tuple(),
+        cache=maid.cache.CacheType.NONE,
+        output_stream=sys.stdout,
+        script_stream=sys.stderr,
+        independent_targets=False,
+        is_default=False,
+        ):
+
+    def build_task(define_commands):
+        t = maid.Task(
+                name,
+                inputs=inputs,
+                required_files=required_files,
+                targets=targets,
+                cache=cache,
+                is_default=is_default,
+                independent_targets_creator=define_commands if independent_targets else None,
+                required_tasks=required_tasks,
+                output_stream=output_stream,
+                script_stream=script_stream,
+                )
+        # Let `define_commands` immediately create commands for the task.
+        define_commands(t)
+        return lambda: t
+
+    return build_task
