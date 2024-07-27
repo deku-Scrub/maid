@@ -5,9 +5,9 @@ import sys
 import subprocess
 from typing import Optional, Any, Iterable, IO, Callable, Final, Self
 
-import maid.exceptions
-import maid.cache
+import maid.cache.cacher
 import maid.files
+import maid.compose.base
 
 
 class RunPhase(enum.Enum):
@@ -94,7 +94,7 @@ class SimpleTask:
             case x if callable(x):
                 self._commands.append(command)
             case _:
-                raise maid.exceptions.UnknownCommandTypeException(command)
+                raise UnknownCommandTypeException(command)
 
     def write_to_file(self, filename: str) -> None:
         SimpleTask._validate_filename(filename)
@@ -108,11 +108,11 @@ class SimpleTask:
 
     def _validate_filename(filename: str) -> None:
         #if self._outfile:
-            #raise maid.exceptions.EndOfTaskError(filename)
+            #raise EndOfTaskError(filename)
         if not isinstance(filename, str):
-            raise maid.exceptions.InvalidFileTypeException(filename)
+            raise InvalidFileTypeException(filename)
         if not filename:
-            raise maid.exceptions.EmptyOutputFileException()
+            raise EmptyOutputFileException()
 
     def __str__(self) -> str:
         '''
@@ -150,7 +150,7 @@ class SimpleTask:
             case _ if callable(command):
                 return map(command, inputs)
             case _:
-                raise maid.exceptions.UnknownCommandTypeException(command)
+                raise UnknownCommandTypeException(command)
 
     def _postrun[T](self, outputs: Iterable[T]) -> None:
         '''
@@ -168,7 +168,7 @@ class SimpleTask:
                 self._output_stream.writelines(outputs)
 
 
-class Task:
+class Task(maid.compose.base.DependecyGraphTask):
 
     _visited = set()
 
@@ -185,7 +185,7 @@ class Task:
             required_tasks: Optional[Iterable[str]] = None, # o
             required_files: Optional[Iterable[str]] = None, # o
             targets: Optional[Iterable[str]] = None, # o
-            cache: maid.cache.CacheType = maid.cache.CacheType.NONE, # o
+            cache: maid.cache.cacher.CacheType = maid.cache.cacher.CacheType.NONE, # o
             build_task: Optional[Callable[[Self], None]] = None,
             script_stream: IO = None, # o
             output_stream: IO = None, # o
@@ -195,12 +195,14 @@ class Task:
             finish_depth_on_failure: bool = False, # o
             update_requested: bool = False, # o
             ):
+        super().__init__(name)
+
         self.name = name
 
         rp = required_tasks if required_tasks else dict()
         self.required_tasks: Final[dict[str, Self]] = {t().name: t() for t in rp}
 
-        self._task_cacher: Final[maid.cache.TaskCacher] = maid.cache.TaskCacher(self)
+        self._task_cacher: Final[maid.cache.cacher.TaskCacher] = maid.cache.cacher.TaskCacher(self)
         self._simple_task: Final[SimpleTask] = SimpleTask(
                 inputs=inputs,
                 script_stream=script_stream,
@@ -212,7 +214,7 @@ class Task:
         self._mode: str = ''
         self._finish_depth_on_failure: Final[bool] = finish_depth_on_failure
         self.dont_run_if_all_targets_exist: Final[bool] = dont_run_if_all_targets_exist
-        self.cache: Final[maid.cache.CacheType] = cache
+        self.cache: Final[maid.cache.cacher.CacheType] = cache
         self.update_requested: Final[bool] = update_requested
         self._delete_targets_on_error: Final[bool] = delete_targets_on_error
         self.maid_name: Final[str] = maid_name
@@ -422,8 +424,8 @@ class Task:
         '''
         Run functions that require the task to have finished.
         '''
-        if (f := maid.cache.any_files_missing(self.targets)):
-            raise maid.exceptions.MissingTargetException(task, f)
+        if (f := maid.cache.cacher.any_files_missing(self.targets)):
+            raise MissingTargetException(task, f)
 
         self._task_cacher.cache_targets()
 
@@ -439,6 +441,48 @@ class Task:
                 (t for t in tasks if t.name not in Task._visited),
                 delay_throw=delay_throw,
                 )
+
+
+class EmptyOutputFileException(Exception):
+    '''
+    '''
+
+    def __init__(self):
+        '''
+        '''
+        msg = 'The right operand of `>` and `>>` must not be empty'
+        super().__init__(msg)
+
+
+class InvalidFileTypeException(Exception):
+    '''
+    '''
+
+    def __init__(self, filename: str):
+        '''
+        '''
+        msg = 'The right operand of `>` and `>>` must be a string, instead got {}'.format(filename)
+        super().__init__(msg)
+
+
+class MissingTargetException(Exception):
+    '''
+    '''
+
+    def __init__(self, task: Task, filename: str):
+        '''
+        '''
+        msg = 'Task `{task}` ran without error but did not create expected files: `{filename}` not found.'.format(task=task.name, filename=filename)
+        super().__init__(msg)
+
+
+class UnknownCommandTypeException(Exception):
+
+    def __init__(self, command: Any):
+        '''
+        '''
+        msg = 'Unknown command type used with `|`: {}.  Only `str`, `callable`, and `tuple` instances are supported.'.format(command)
+        super().__init__(msg)
 
 
 def _print_scripts[I, O](
