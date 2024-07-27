@@ -1,8 +1,12 @@
 import os
 import pathlib
+from typing import Iterable
 
 
-def get_filenames(filenames, must_exist=True):
+def get_filenames(
+        filenames: Iterable[str],
+        must_exist: bool = True,
+        ) -> Iterable[str]:
     for f in filenames:
         dirname, basename = os.path.split(f)
 
