@@ -3,7 +3,7 @@ import sys
 from typing import Iterable, Final, IO, Callable
 
 import maid.cache
-import maid.composition
+import maid.compose.tasks
 
 DEFAULT_MAID_NAME: str = 'm0'
 _maids: dict = dict()
@@ -15,11 +15,11 @@ class _Maid:
 
     def __init__(self, name: str):
         self.name: Final[str] = name
-        self._default_task: maid.composition.Task = None
-        self._tasks: dict[str, maid.composition.Task] = dict()
-        self._start_tasks: dict[str, maid.composition.Task] = dict()
-        self._end_tasks: dict[str, maid.composition.Task] = dict()
-        self._finally_tasks: dict[str, maid.composition.Task] = dict()
+        self._default_task: maid.compose.tasks.Task = None
+        self._tasks: dict[str, maid.compose.tasks.Task] = dict()
+        self._start_tasks: dict[str, maid.compose.tasks.Task] = dict()
+        self._end_tasks: dict[str, maid.compose.tasks.Task] = dict()
+        self._finally_tasks: dict[str, maid.compose.tasks.Task] = dict()
 
     def dry_run(
             self,
@@ -36,10 +36,10 @@ class _Maid:
 
     def _run[T](
             self,
-            tasks: Iterable[maid.composition.Task],
+            tasks: Iterable[maid.compose.tasks.Task],
             capture_outputs: bool = True,
             ) -> Iterable[T]:
-        outputs = map(maid.composition.Task.run, tasks)
+        outputs = map(maid.compose.tasks.Task.run, tasks)
         empty_iter = filter(lambda _: False, outputs)
         return outputs if capture_outputs else list(empty_iter)
 
@@ -52,29 +52,29 @@ class _Maid:
         finally:
             _ = self._run(self._finally_tasks.values(), capture_outputs=False)
 
-    def _get_task(self, task_name: str) -> maid.composition.Task:
+    def _get_task(self, task_name: str) -> maid.compose.tasks.Task:
         if task_name in self._tasks:
             return self._tasks[task_name]
         if self._default_task:
             return self._default_task
         raise UnknownTaskException(task)
 
-    def add_task(self, task: maid.composition.Task) -> bool:
+    def add_task(self, task: maid.compose.tasks.Task) -> bool:
         '''
         Add a task.
 
         If the task name is empty, it will not be added.
         '''
         match task:
-            case maid.composition.Task(name=''):
+            case maid.compose.tasks.Task(name=''):
                 return False
-            case maid.composition.Task(name=x) if x in self._tasks:
+            case maid.compose.tasks.Task(name=x) if x in self._tasks:
                 raise DuplicateTaskException(task)
-            case maid.composition.Task(is_default=True) if self._default_task:
+            case maid.compose.tasks.Task(is_default=True) if self._default_task:
                 raise DuplicateTaskException(task)
-            case maid.composition.Task(is_default=True, run_phase=x) if x != maid.RunPhase.NORMAL:
+            case maid.compose.tasks.Task(is_default=True, run_phase=x) if x != maid.RunPhase.NORMAL:
                 raise DefaultTaskRunPhaseException(task)
-            case maid.composition.Task(is_default=True):
+            case maid.compose.tasks.Task(is_default=True):
                 self._default_task = task
 
         match task.run_phase:
@@ -103,14 +103,14 @@ def task[T](
         independent_targets: bool = False,
         is_default: bool = False,
         ) -> Callable[
-            [Callable[[maid.composition.Task], None]],
-            Callable[[], maid.composition.Task]
+            [Callable[[maid.compose.tasks.Task], None]],
+            Callable[[], maid.compose.tasks.Task]
         ]:
 
     def build_task(
-            define_commands: Callable[[maid.composition.Task], None]
-            ) -> Callable[[], maid.composition.Task]:
-        t = maid.composition.Task(
+            define_commands: Callable[[maid.compose.tasks.Task], None]
+            ) -> Callable[[], maid.compose.tasks.Task]:
+        t = maid.compose.tasks.Task(
                 name,
                 maid_name=maid_name,
                 inputs=inputs,
@@ -140,7 +140,7 @@ def get_maid(maid_name: str = DEFAULT_MAID_NAME) -> _Maid:
 
 class DefaultTaskRunPhaseException(Exception):
 
-    def __init__(self, task: maid.composition.Task):
+    def __init__(self, task: maid.compose.tasks.Task):
         '''
         '''
         msg = 'Only pipelines in the `NORMAL` run phase can be a default; was given `{}` for task `{}`.'.format(
@@ -152,7 +152,7 @@ class DefaultTaskRunPhaseException(Exception):
 
 class DuplicateTaskException(Exception):
 
-    def __init__(self, task: maid.composition.Task):
+    def __init__(self, task: maid.compose.tasks.Task):
         '''
         '''
         msg = 'Maid `{}` already has task named `{}`.'.format(
@@ -164,7 +164,7 @@ class DuplicateTaskException(Exception):
 
 class UnknownTaskException(Exception):
 
-    def __init__(self, task: maid.composition.Task):
+    def __init__(self, task: maid.compose.tasks.Task):
         '''
         '''
         msg = 'Unknown task.  Maid `{}` has no task named `{}`'.format(
