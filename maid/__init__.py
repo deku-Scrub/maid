@@ -1,2 +1,2 @@
-from maid._maid import DEFAULT_MAID_NAME, get_maid, task
+from maid._maid import task, get_maid
 from maid.composition import RunPhase, Task
