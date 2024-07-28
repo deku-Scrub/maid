@@ -1,19 +1,19 @@
 import pathlib
 import os
-from typing import Iterable
+from typing import Sequence, Never, Generator
 
 import maid.files
 import maid.compose.base
 
 
-def touch_files(filenames: Iterable[str]) -> None:
+def touch_files(filenames: Sequence[str] | Generator[str, None, None]) -> None:
     for f in filenames:
         pathlib.Path(f).touch()
 
 
 def _is_any_newer(
-        filenames: Iterable[str],
-        target_time: int,
+        filenames: Sequence[str] | Generator[str, None, None],
+        target_time: float,
         must_exist: bool = True,
         ) -> bool:
     for f in filenames:
@@ -27,8 +27,8 @@ def _is_any_newer(
 
 
 def should_task_run(
-        task: maid.compose.base.DependecyGraphTask
-        ) -> tuple[str, str]:
+        task: maid.compose.base.DependencyGraphTask
+        ) -> tuple[str, str] | tuple[Never, ...]:
     # If any outputs don't exist, the task should run.
     oldest_time = float('inf')
     for o in maid.files.get_filenames(task.targets):

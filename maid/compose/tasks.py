@@ -3,11 +3,13 @@ import itertools
 import functools
 import sys
 import subprocess
-from typing import Optional, Any, Iterable, IO, Callable, Final, Self
+from typing import Optional, Any, Sequence, IO, Callable, Final, Self, Generator, Iterable, Never, Mapping, assert_never, cast
 
 import maid.cache.cacher
+import maid.cache.cache_types
 import maid.files
 import maid.compose.base
+import maid.error_utils
 
 
 class RunPhase(enum.Enum):
@@ -21,20 +23,23 @@ class ShellPipeline:
     '''
     '''
 
-    def __init__(self):
-        self._commands: list = []
+    def __init__(self) -> None:
+        self._commands: list[str] = []
 
     def append(self, cmd: str) -> None:
         self._commands.append(cmd)
 
     @staticmethod
-    def _make_process(cmd: str, stdin: IO) -> subprocess.Popen:
+    def _chain_process(
+            prev_proc: subprocess.Popen | None,
+            cmd: str,
+            ) -> subprocess.Popen:
         '''
         Make process with the necessary common parameters.
         '''
         return subprocess.Popen(
                 cmd,
-                stdin=stdin,
+                stdin=prev_proc.stdout if prev_proc else subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 shell=True,
                 text=True,
@@ -43,16 +48,20 @@ class ShellPipeline:
     def __str__(self) -> str:
         return '\n'.join(self._commands)
 
-    def __call__[I, O](self, inputs: Optional[Iterable[I]] = None) -> Iterable[O]:
+    def __call__[I, O](self, inputs: Sequence[I] | Generator[I, None, None] | Iterable[I] | tuple[()] = tuple()) -> Generator[O, None, None]:
+        if not self._commands:
+            return
+
         # Hook up command outputs to inputs.
         processes = list(itertools.accumulate(
                 self._commands[1:],
-                lambda proc, cmd: ShellPipeline._make_process(cmd, proc.stdout),
-                initial=ShellPipeline._make_process(self._commands[0], subprocess.PIPE),
+                ShellPipeline._chain_process,
+                initial=ShellPipeline._chain_process(None, self._commands[0]),
                 ))
 
         # Write to first command.
-        inputs = inputs if inputs else tuple()
+        assert processes[0].stdin is not None # Needed for mypy.
+        assert processes[-1].stdout is not None # Needed for mypy.
         processes[0].stdin.writelines(str(i) + '\n' for i in inputs)
         processes[0].stdin.flush()
         processes[0].stdin.close()
@@ -61,23 +70,26 @@ class ShellPipeline:
         yield from processes[-1].stdout
 
 
+type CommandType = ShellPipeline | Callable[[Any], Any] | tuple[Callable[[Any, Any], Any], Any]
+
+
 class SimpleTask:
 
     def __init__[T](
             self,
             *,
-            inputs: tuple[T] = tuple(),
-            script_stream: IO = sys.stdout,
-            output_stream: IO = sys.stdout,
+            inputs: Sequence[T] | None = None,
+            script_stream: IO | None = None,
+            output_stream: IO | None = None,
             ):
         '''
         '''
-        self._inputs: Final[tuple[T]] = inputs
-        self._commands: Final[list[ShellPipeline | Callable[[Any], Any]]] = []
+        self._inputs: Final[Sequence[T]] = inputs if inputs else tuple()
+        self._commands: Final[list[CommandType]] = []
         self._outfile: str = ''
         self._mode: str = ''
-        self._script_stream: Final[IO] = script_stream
-        self._output_stream: Final[IO] = output_stream
+        self._script_stream: Final[IO | None] = script_stream
+        self._output_stream: Final[IO | None] = output_stream
 
     def append(self, command: str | tuple | Callable[[Any], Any]) -> None:
         '''
@@ -89,6 +101,8 @@ class SimpleTask:
                         self._commands.append(ShellPipeline())
                     case list(x) if not isinstance(x[-1], ShellPipeline):
                         self._commands.append(ShellPipeline())
+                # Needed for mypy to stop complaining about "no append".
+                assert isinstance(self._commands[-1], ShellPipeline)
                 self._commands[-1].append(command)
             case tuple():
                 self._commands.append(command)
@@ -129,7 +143,7 @@ class SimpleTask:
                 truncate=truncate,
                 )
 
-    def run[T](self) -> Iterable[T]:
+    def run(self) -> Any:
         outputs = functools.reduce(
                 self._run_command,
                 self._commands,
@@ -138,11 +152,11 @@ class SimpleTask:
         self._postrun(outputs)
         return outputs
 
-    def _run_command[I, O](
+    def _run_command[I](
             self,
-            inputs: Iterable[I],
-            command: ShellPipeline | tuple | Callable[[I], O]
-            ) -> Iterable[O]:
+            inputs: Iterable[I] | Sequence[I] | Generator[I, None, None] | tuple[()],
+            command: CommandType,
+            ) -> Any:
         _print_scripts(self._script_stream, command)
         match command:
             case ShellPipeline():
@@ -151,10 +165,10 @@ class SimpleTask:
                 return command[0](*command[1:], inputs)
             case _ if callable(command):
                 return map(command, inputs)
-            case _:
-                raise UnknownCommandTypeException(command)
+            case _ as unreachable:
+                assert_never(unreachable)
 
-    def _postrun[T](self, outputs: Iterable[T]) -> None:
+    def _postrun[T](self, outputs: Sequence[T]) -> None:
         '''
         Run functions that require the task to have finished.
         '''
@@ -170,9 +184,9 @@ class SimpleTask:
                 self._output_stream.writelines(outputs)
 
 
-class Task(maid.compose.base.DependecyGraphTask):
+class Task(maid.compose.base.DependencyGraphTask):
 
-    _visited = set()
+    _visited: set[str] = set()
 
     def __init__[T](
             self,
@@ -183,26 +197,29 @@ class Task(maid.compose.base.DependecyGraphTask):
             run_phase: RunPhase = RunPhase.NORMAL, # o
             is_default: bool = False, # o
             # Task exclusive.
-            inputs: Optional[Iterable[T]] = None, # o
-            required_tasks: Optional[Iterable[str]] = None, # o
-            required_files: Optional[Iterable[str]] = None, # o
-            targets: Optional[Iterable[str]] = None, # o
-            cache: maid.cache.cacher.CacheType = maid.cache.cacher.CacheType.NONE, # o
-            build_task: Optional[Callable[[Self], None]] = None,
-            script_stream: IO = None, # o
-            output_stream: IO = None, # o
+            inputs: Sequence[T] | None = None, # o
+            required_tasks: Sequence[Callable[[], 'Task']] | None = None, # o
+            required_files: Sequence[str] | None = None, # o
+            targets: Sequence[str] | None = None, # o
+            cache: maid.cache.cache_types.CacheType = maid.cache.cache_types.CacheType.NONE, # o
+            build_task: Callable[['Task'], None] | None = None,
+            script_stream: IO | None = None, # o
+            output_stream: IO | None = None, # o
             delete_targets_on_error: bool = True, #o
             dont_run_if_all_targets_exist: bool = False, # o
             description: str = '',
             finish_depth_on_failure: bool = False, # o
             update_requested: bool = False, # o
             ):
-        super().__init__(name)
 
-        self.name = name
-
-        rp = required_tasks if required_tasks else dict()
-        self.required_tasks: Final[dict[str, Self]] = {t().name: t() for t in rp}
+        super().__init__(
+                name,
+                required_tasks=required_tasks,
+                required_files=required_files,
+                targets=targets,
+                dont_run_if_all_targets_exist=dont_run_if_all_targets_exist,
+                cache=cache,
+                )
 
         self._task_cacher: Final[maid.cache.cacher.TaskCacher] = maid.cache.cacher.TaskCacher(self)
         self._simple_task: Final[SimpleTask] = SimpleTask(
@@ -210,22 +227,18 @@ class Task(maid.compose.base.DependecyGraphTask):
                 script_stream=script_stream,
                 output_stream=output_stream,
                 )
-        self.required_files: Final[tuple[str]] = tuple(required_files) if required_files else tuple()
-        self.targets: Final[tuple[str]] = tuple(targets) if targets else tuple()
         self._outfile: str = ''
         self._mode: str = ''
         self._finish_depth_on_failure: Final[bool] = finish_depth_on_failure
-        self.dont_run_if_all_targets_exist: Final[bool] = dont_run_if_all_targets_exist
-        self.cache: Final[maid.cache.cacher.CacheType] = cache
         self.update_requested: Final[bool] = update_requested
         self._delete_targets_on_error: Final[bool] = delete_targets_on_error
         self.maid_name: Final[str] = maid_name
         self.is_default: Final[bool] = is_default
         self.run_phase: Final[RunPhase] = run_phase
 
-        self._get_independent_task: Optional[Callable[[str], Self]] = None
+        self._get_independent_task: Callable[[str], Task] | None = None
         if build_task:
-            def f(target: str) -> Self:
+            def f(target: str) -> Task:
                 # Makes several assumptions:
                 #   * the empty `name` prevents querying maid.
                 #   * the lack of `required_tasks` skips running
@@ -299,7 +312,10 @@ class Task(maid.compose.base.DependecyGraphTask):
                 Task._visited.clear()
 
     @staticmethod
-    def _get_required_dry_runs(tasks: Iterable[Self], verbose: bool) -> str:
+    def _get_required_dry_runs(
+            tasks: Iterable[maid.compose.base.DependencyGraphTask],
+            verbose: bool,
+            ) -> Callable[[], str]:
         return lambda: '\n'.join(
             t.dry_run(verbose)
             for t in tasks
@@ -341,7 +357,7 @@ class Task(maid.compose.base.DependecyGraphTask):
                 recipe=str(self),
                 )
 
-    def run[T](self) -> Iterable[T]:
+    def run[T](self) -> Sequence[T]:
         '''
         Run task.
         '''
@@ -349,12 +365,12 @@ class Task(maid.compose.base.DependecyGraphTask):
 
     @staticmethod
     def _throw_if_any_fail[T](
-            f: Callable[[T], None],
-            iterable: Iterable[T],
+            f: Callable[[T], Any],
+            iterable: Sequence[T] | Iterable[T],
             *,
             delay_throw: bool = False,
             ) -> None:
-        error: Exception = None
+        error: Exception | None = None
         for val in iterable:
             try:
                 f(val)
@@ -368,12 +384,12 @@ class Task(maid.compose.base.DependecyGraphTask):
         if error:
             raise error
 
-    def _prerun(self) -> tuple[bool, str]:
+    def _prerun(self) -> tuple[bool, tuple[Never, ...]]:
         '''
         Run functions that the task requires to have finished.
         '''
         Task._run_dependencies(
-                self.required_tasks.values(),
+                (cast(Task, t) for t in self.required_tasks.values()),
                 delay_throw=self._finish_depth_on_failure,
                 )
         if self._task_cacher.is_up_to_date()[0]:
@@ -381,9 +397,9 @@ class Task(maid.compose.base.DependecyGraphTask):
         if self.update_requested:
             self._task_cacher.cache_all()
             return True, tuple()
-        return False, ''
+        return False, tuple()
 
-    def _main_run[T](self) -> Iterable[T]:
+    def _main_run[T](self) -> Sequence[T]:
         '''
         Logic for running the task.
         '''
@@ -394,18 +410,24 @@ class Task(maid.compose.base.DependecyGraphTask):
         # Can't guarantee that they're all the same length.  Too
         # many problems.  Either end in `>` or ignore output.
         if self._get_independent_task:
+
+            # Needed to prevent mypy from saying 'None not callable'.
+            assert self._get_independent_task is not None
+            build_task: Callable[[str], Task] = self._get_independent_task
+
             Task._throw_if_any_fail(
-                    lambda f: self._get_independent_task(f).run(),
+                    lambda f: build_task(f).run(),
                     maid.files.get_filenames(self.targets),
                     delay_throw=self._finish_depth_on_failure,
                     )
             return tuple()
         return self._simple_task.run()
 
-    def _run[T](self) -> Iterable[T]:
+    def _run[T](self) -> Sequence[T]:
         '''
         Execute the pre-, main-, and post-run stages.
         '''
+        outputs: Sequence[T] = tuple()
         try:
             if (stop_early := self._prerun()) and stop_early[0]:
                 return stop_early[1]
@@ -415,13 +437,13 @@ class Task(maid.compose.base.DependecyGraphTask):
             # errors, particularly overwriting files.
             if not self._get_independent_task:
                 self._postrun()
-            return outputs
         except Exception as err:
             msg = 'Error running task `{}`: {}'.format(self.name, err)
             maid.error_utils.remove_files_and_throw(
                     maid.files.get_filenames(self.targets) if self._delete_targets_on_error else [],
                     Exception(msg),
                     )
+        return outputs
 
     def _postrun(self) -> None:
         '''
@@ -434,11 +456,11 @@ class Task(maid.compose.base.DependecyGraphTask):
 
     @staticmethod
     def _run_dependencies(
-            tasks: Iterable[Self],
+            tasks: Iterable['Task'],
             *,
             delay_throw: bool = False,
             ) -> None:
-        # Checking that `p.name not in Task._visited` prevents reruning
+        # Checking that `t.name not in Task._visited` prevents reruning
         # pipelines that have already run.
         Task._throw_if_any_fail(
                 Task.run,
@@ -451,7 +473,7 @@ class EmptyOutputFileException(Exception):
     '''
     '''
 
-    def __init__(self):
+    def __init__(self) -> None:
         '''
         '''
         msg = 'The right operand of `>` and `>>` must not be empty'
@@ -490,14 +512,14 @@ class UnknownCommandTypeException(Exception):
 
 
 def _print_scripts[I, O](
-        outstream: IO,
-        command: ShellPipeline | tuple | Callable[[I], O],
+        outstream: IO | None,
+        command: str | ShellPipeline | tuple | Callable[[I], O],
         ) -> None:
     if outstream:
         outstream.write(str(command) + '\n')
 
 
-def _write_to_file(lines: Iterable[str], filename: str, mode: str) -> None:
+def _write_to_file[T](lines: Sequence[T], filename: str, mode: str) -> bool:
     if not filename:
         return False
 

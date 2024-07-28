@@ -1,5 +1,5 @@
 import itertools
-from typing import Iterable, Final
+from typing import Iterable, Final, Sequence, Iterator
 
 import maid.compose.tasks
 
@@ -13,7 +13,7 @@ class _Maid:
 
     def __init__(self, name: str):
         self.name: Final[str] = name
-        self._default_task: maid.compose.tasks.Task = None
+        self._default_task: maid.compose.tasks.Task | None = None
         self._tasks: dict[str, maid.compose.tasks.Task] = dict()
         self._start_tasks: dict[str, maid.compose.tasks.Task] = dict()
         self._end_tasks: dict[str, maid.compose.tasks.Task] = dict()
@@ -36,10 +36,10 @@ class _Maid:
             self,
             tasks: Iterable[maid.compose.tasks.Task],
             capture_outputs: bool = True,
-            ) -> Iterable[T]:
-        outputs = map(maid.compose.tasks.Task.run, tasks)
-        empty_iter = filter(lambda _: False, outputs)
-        return outputs if capture_outputs else list(empty_iter)
+            ) -> Iterator[Sequence[T]]:
+        outputs: Iterator[Sequence[T]] = map(maid.compose.tasks.Task.run, tasks)
+        empty_iter: Iterator[Sequence[T]] = filter(lambda _: False, outputs)
+        return outputs if capture_outputs else iter(list(empty_iter))
 
     def run[T](self, task_name: str = '') -> Iterable[T]:
         try:

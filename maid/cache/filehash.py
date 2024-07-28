@@ -3,7 +3,7 @@ import hashlib
 import os
 import base64
 import time
-from typing import Iterable
+from typing import Sequence, Never, Generator
 
 import maid.files
 import maid.compose.base
@@ -14,7 +14,7 @@ index_dir = os.path.join('.maid', 'index')
 os.makedirs(index_dir, exist_ok=True)
 
 
-def make_hashes(filenames: Iterable[str]) -> None:
+def make_hashes(filenames: Sequence[str] | Generator[str, None, None]) -> None:
     for filename in filenames:
         if not _is_hash_changed(filename):
             continue
@@ -78,15 +78,15 @@ def _get_hash_creation_time(filename: str) -> int:
     return 0
 
 
-def _is_newer(filename: str, timestamp: int) -> bool:
+def _is_newer(filename: str, timestamp: float) -> bool:
     '''
     '''
     return _get_hash_creation_time(filename) > timestamp
 
 
 def should_task_run(
-        task: maid.compose.base.DependecyGraphTask
-        ) -> tuple[str, str]:
+        task: maid.compose.base.DependencyGraphTask
+        ) -> tuple[str, str] | tuple[Never, ...]:
     oldest_time = float('inf')
     # If any outputs or their hashes don't exist, the task should run.
     for f in maid.files.get_filenames(task.targets):
