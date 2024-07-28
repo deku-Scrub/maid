@@ -1,14 +1,14 @@
 import os
 import pathlib
-from typing import Iterable
+from typing import Sequence, Generator
 
 
 def get_filenames(
-        filenames: Iterable[str],
+        filenames: Sequence[str] | Generator[str, None, None],
         must_exist: bool = True,
-        ) -> Iterable[str]:
-    for f in filenames:
-        dirname, basename = os.path.split(f)
+        ) -> Generator[str, None, None]:
+    for filename in filenames:
+        dirname, basename = os.path.split(filename)
 
         # Whichever isn't empty is the basename.
         if not basename:
@@ -17,10 +17,10 @@ def get_filenames(
             yield basename
         else:
             has_files = False
-            for p in pathlib.Path(dirname).glob(basename.replace('\\', '\\\\')):
-                yield str(p)
+            for path in pathlib.Path(dirname).glob(basename.replace('\\', '\\\\')):
+                yield str(path)
                 has_files = True
             if (not has_files) and must_exist:
-                raise FileNotFoundError('Required file not found: {}'.format(f))
+                raise FileNotFoundError('Required file not found: {}'.format(filename))
             if (not has_files) and (not must_exist):
-                yield f
+                yield filename

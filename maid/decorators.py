@@ -1,19 +1,19 @@
-from typing import Iterable, IO, Callable
+from typing import IO, Callable, Sequence
 import sys
 
 import maid.maid_utils
-import maid.cache
+import maid.cache.cache_types
 import maid.compose.tasks
 
 
 def task[T](
         name: str,
         maid_name: str = maid.maid_utils.DEFAULT_MAID_NAME,
-        inputs: Iterable[T] = None,
-        required_files: Iterable = tuple(),
-        required_tasks: Iterable = tuple(),
+        inputs: Sequence[T] = tuple(),
+        required_files: Sequence[str] = tuple(),
+        required_tasks: Sequence[Callable[[], maid.compose.tasks.Task]] = tuple(),
         targets: tuple = tuple(),
-        cache: maid.cache.CacheType = maid.cache.CacheType.NONE,
+        cache: maid.cache.cache_types.CacheType = maid.cache.cache_types.CacheType.NONE,
         output_stream: IO = sys.stdout,
         script_stream: IO = sys.stderr,
         independent_targets: bool = False,

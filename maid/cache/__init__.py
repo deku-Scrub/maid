@@ -1,1 +1,1 @@
-from maid.cache.cacher import CacheType
+from maid.cache.cache_types import CacheType
