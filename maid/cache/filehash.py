@@ -3,18 +3,18 @@ import hashlib
 import os
 import base64
 import time
-from typing import Sequence, Never, Generator
+from typing import Iterable, Never, Final
 
 import maid.files
 import maid.compose.base
 
 
 # TODO: make this a config value.
-index_dir = os.path.join('.maid', 'index')
+index_dir: Final[str] = os.path.join('.maid', 'index')
 os.makedirs(index_dir, exist_ok=True)
 
 
-def make_hashes(filenames: Sequence[str] | Generator[str, None, None]) -> None:
+def make_hashes(filenames: Iterable[str]) -> None:
     for filename in filenames:
         if not _is_hash_changed(filename):
             continue
