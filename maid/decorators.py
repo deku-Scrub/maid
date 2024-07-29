@@ -1,31 +1,29 @@
-from typing import IO, Callable, Sequence
+from typing import IO, Callable, Sequence, Any
 import sys
 
 import maid.maid_utils
-import maid.cache.cache_types
+import maid.cache
 import maid.compose.tasks
 
+type TaskBuilder = Callable[[], maid.compose.tasks.Task]
+type CommandDefiner = Callable[[maid.compose.tasks.Task], None]
 
-def task[T](
+
+def task(
         name: str,
         maid_name: str = maid.maid_utils.DEFAULT_MAID_NAME,
-        inputs: Sequence[T] = tuple(),
+        inputs: Sequence[Any] = tuple(),
         required_files: Sequence[str] = tuple(),
-        required_tasks: Sequence[Callable[[], maid.compose.tasks.Task]] = tuple(),
-        targets: tuple = tuple(),
-        cache: maid.cache.cache_types.CacheType = maid.cache.cache_types.CacheType.NONE,
+        required_tasks: Sequence[TaskBuilder] = tuple(),
+        targets: Sequence[str] = tuple(),
+        cache: maid.cache.CacheType = maid.cache.CacheType.NONE,
         output_stream: IO = sys.stdout,
         script_stream: IO = sys.stderr,
         independent_targets: bool = False,
         is_default: bool = False,
-        ) -> Callable[
-            [Callable[[maid.compose.tasks.Task], None]],
-            Callable[[], maid.compose.tasks.Task]
-        ]:
+        ) -> Callable[[CommandDefiner], TaskBuilder]:
 
-    def build_task(
-            define_commands: Callable[[maid.compose.tasks.Task], None]
-            ) -> Callable[[], maid.compose.tasks.Task]:
+    def build_task(define_commands: CommandDefiner) -> TaskBuilder:
         t = maid.compose.tasks.Task(
                 name,
                 maid_name=maid_name,

@@ -1,5 +1,5 @@
 import os
-from typing import Sequence, Final
+from typing import Iterable, Final
 
 import maid.cache.filehash
 import maid.cache.timestamp
@@ -7,7 +7,9 @@ import maid.cache
 import maid.compose.base
 import maid.files
 
-
+# TODO: Instead of having if-statements that compare
+# `maid.cache.CacheType` values, have separate classes for each
+# value.  For example, `TaskHashCacher`, `TaskTimeCacher`, etc.
 class TaskCacher:
 
     def __init__(self, task: maid.compose.base.DependencyGraphTask):
@@ -54,7 +56,7 @@ class TaskCacher:
 
 def _update_files(
         cache: maid.cache.CacheType,
-        filenames: Sequence[str],
+        filenames: Iterable[str],
         ) -> None:
     if cache == maid.cache.CacheType.TIME:
         maid.cache.timestamp.touch_files(maid.files.get_filenames(filenames))
@@ -63,7 +65,7 @@ def _update_files(
 
 
 def any_files_missing(
-        filenames: Sequence[str],
+        filenames: Iterable[str],
         must_exist: bool = True,
         ) -> str:
     filenames_gen = maid.files.get_filenames(filenames, must_exist=must_exist)

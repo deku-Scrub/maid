@@ -1,18 +1,18 @@
 import pathlib
 import os
-from typing import Sequence, Never, Generator
+from typing import Iterable, Never
 
 import maid.files
 import maid.compose.base
 
 
-def touch_files(filenames: Sequence[str] | Generator[str, None, None]) -> None:
+def touch_files(filenames: Iterable[str]) -> None:
     for f in filenames:
         pathlib.Path(f).touch()
 
 
 def _is_any_newer(
-        filenames: Sequence[str] | Generator[str, None, None],
+        filenames: Iterable[str],
         target_time: float,
         must_exist: bool = True,
         ) -> bool:

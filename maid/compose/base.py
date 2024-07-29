@@ -1,5 +1,5 @@
 from abc import abstractmethod
-from typing import Self, Sequence, Never, Final, Mapping, Callable
+from typing import Self, Iterable, Sequence, Never, Final, Mapping, Callable
 
 import maid.cache
 
@@ -12,9 +12,9 @@ class DependencyGraphTask:
             self,
             name: str = '',
             *,
-            required_tasks: Sequence[TaskBuilder] = tuple(),
-            required_files: Sequence[str] = tuple(),
-            targets: Sequence[str] = tuple(),
+            required_tasks: Iterable[TaskBuilder] = tuple(),
+            required_files: Iterable[str] = tuple(),
+            targets: Iterable[str] = tuple(),
             cache: maid.cache.CacheType = maid.cache.CacheType.NONE,
             dont_run_if_all_targets_exist: bool = False,
             ):

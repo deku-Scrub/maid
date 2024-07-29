@@ -1,5 +1,5 @@
 import itertools
-from typing import Iterable, Final, Sequence, Iterator
+from typing import Iterable, Final, Iterator
 
 import maid.compose.tasks
 
@@ -36,9 +36,9 @@ class _Maid:
             self,
             tasks: Iterable[maid.compose.tasks.Task],
             capture_outputs: bool = True,
-            ) -> Iterator[Sequence[T]]:
-        outputs: Iterator[Sequence[T]] = map(maid.compose.tasks.Task.run, tasks)
-        empty_iter: Iterator[Sequence[T]] = filter(lambda _: False, outputs)
+            ) -> Iterator[Iterable[T]]:
+        outputs: Iterator[Iterable[T]] = map(maid.compose.tasks.Task.run, tasks)
+        empty_iter: Iterator[Iterable[T]] = filter(lambda _: False, outputs)
         return outputs if capture_outputs else iter(list(empty_iter))
 
     def run[T](self, task_name: str = '') -> Iterable[T]:
@@ -69,7 +69,7 @@ class _Maid:
             case maid.compose.tasks.Task(name=x) if x in self._tasks:
                 raise DuplicateTaskException(task)
             case maid.compose.tasks.Task(is_default=True) if self._default_task:
-                raise DuplicateTaskException(task)
+                raise DefaultTaskException(task, self._default_task.name)
             case maid.compose.tasks.Task(is_default=True, run_phase=x) if x != maid.RunPhase.NORMAL:
                 raise DefaultTaskRunPhaseException(task)
             case maid.compose.tasks.Task(is_default=True):
@@ -112,6 +112,19 @@ class DuplicateTaskException(Exception):
         '''
         '''
         msg = 'Maid `{}` already has task named `{}`.'.format(
+                    task.maid_name,
+                    task.name,
+                    )
+        super().__init__(msg)
+
+
+class DefaultTaskException(Exception):
+
+    def __init__(self, task: maid.compose.tasks.Task, default_name: str):
+        '''
+        '''
+        msg = 'Error setting task `{}` as the default.  Maid `{}` already has default task `{}`.'.format(
+                    default_name,
                     task.maid_name,
                     task.name,
                     )

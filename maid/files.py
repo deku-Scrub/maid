@@ -1,12 +1,12 @@
 import os
 import pathlib
-from typing import Sequence, Generator
+from typing import Iterable
 
 
 def get_filenames(
-        filenames: Sequence[str] | Generator[str, None, None],
+        filenames: Iterable[str],
         must_exist: bool = True,
-        ) -> Generator[str, None, None]:
+        ) -> Iterable[str]:
     for filename in filenames:
         dirname, basename = os.path.split(filename)
 
