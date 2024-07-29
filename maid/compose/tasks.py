@@ -52,7 +52,7 @@ class ShellPipeline:
     def __str__(self) -> str:
         return '\n'.join(self._commands)
 
-    def __call__[I, O](self, inputs: Iterable[I] = tuple()) -> Iterable[O]:
+    def __call__(self, inputs: Iterable[Any] = tuple()) -> Iterable[Any]:
         if not self._commands:
             return
 
@@ -170,7 +170,7 @@ class SimpleTask:
             case _ as unreachable:
                 assert_never(unreachable)
 
-    def _postrun[T](self, outputs: Iterable[T]) -> None:
+    def _postrun(self, outputs: Iterable[Any]) -> None:
         '''
         Run functions that require the task to have finished.
         '''
@@ -265,7 +265,7 @@ class Task(maid.compose.base.DependencyGraphTask):
                 return a
             self._get_independent_task = f
 
-    def __gt__(self, rhs: Any) -> Self:
+    def __gt__(self, rhs: str) -> Self:
         '''
         Write to file given by `rhs`.
 
@@ -274,7 +274,7 @@ class Task(maid.compose.base.DependencyGraphTask):
         self._simple_task.write_to_file(rhs)
         return self
 
-    def __rshift__(self, rhs: Any) -> Self:
+    def __rshift__(self, rhs: str) -> Self:
         '''
         Append to file given by `rhs`.
 
@@ -285,7 +285,7 @@ class Task(maid.compose.base.DependencyGraphTask):
         self._simple_task.append_to_file(rhs)
         return self
 
-    def __or__[I, O](self, rhs: str | tuple | Callable[[I], O]) -> Self:
+    def __or__(self, rhs: ValidCommandTypes) -> Self:
         '''
         Add `rhs`'s command to this object's command list.
         '''
@@ -299,7 +299,7 @@ class Task(maid.compose.base.DependencyGraphTask):
         return str(self._simple_task)
 
     @staticmethod
-    def _wrap_visited[T](f: Callable[[], T], task_name: str) -> T:
+    def _wrap_visited(f: Callable[[], Any], task_name: str) -> Any:
         '''
         Reset visited after running f.
         '''
@@ -361,21 +361,21 @@ class Task(maid.compose.base.DependencyGraphTask):
                 recipe=str(self),
                 )
 
-    def run[T](self) -> Iterable[T]:
+    def run(self) -> Iterable[Any]:
         '''
         Run task.
         '''
         return Task._wrap_visited(self._run, self.name)
 
     @staticmethod
-    def _throw_if_any_fail[T](
-            f: Callable[[T], Any],
-            iterable: Iterable[T],
+    def _throw_if_any_fail(
+            f: Callable[[Any], Any],
+            inputs: Iterable[Any],
             *,
             delay_throw: bool = False,
             ) -> None:
         error: Exception | None = None
-        for val in iterable:
+        for val in inputs:
             try:
                 f(val)
             except Exception as err:
@@ -403,7 +403,7 @@ class Task(maid.compose.base.DependencyGraphTask):
             return True, tuple()
         return False, tuple()
 
-    def _main_run[T](self) -> Iterable[T]:
+    def _main_run(self) -> Iterable[Any]:
         '''
         Logic for running the task.
         '''
@@ -427,11 +427,11 @@ class Task(maid.compose.base.DependencyGraphTask):
             return tuple()
         return self._simple_task.run()
 
-    def _run[T](self) -> Iterable[T]:
+    def _run(self) -> Iterable[Any]:
         '''
         Execute the pre-, main-, and post-run stages.
         '''
-        outputs: Iterable[T] = tuple()
+        outputs: Iterable[Any] = tuple()
         try:
             if (stop_early := self._prerun()) and stop_early[0]:
                 return stop_early[1]
@@ -515,15 +515,15 @@ class UnknownCommandTypeException(Exception):
         super().__init__(msg)
 
 
-def _print_scripts[I, O](
+def _print_scripts(
         outstream: IO | None,
-        command: str | ShellPipeline | tuple | Callable[[I], O],
+        command: str | ShellPipeline | tuple | Callable[[object], object],
         ) -> None:
     if outstream:
         outstream.write(str(command) + '\n')
 
 
-def _write_to_file[T](lines: Iterable[T], filename: str, mode: str) -> bool:
+def _write_to_file(lines: Iterable[object], filename: str, mode: str) -> bool:
     if not filename:
         return False
 
