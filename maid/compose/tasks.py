@@ -11,6 +11,7 @@ import maid.files
 import maid.compose.base
 import maid.error_utils
 
+type TaskBuilder = Callable[[], 'Task']
 
 class RunPhase(enum.Enum):
     NORMAL = 0
@@ -188,22 +189,22 @@ class Task(maid.compose.base.DependencyGraphTask):
 
     _visited: set[str] = set()
 
-    def __init__[T](
+    def __init__(
             self,
             name: str = '', # o
             *,
             # Maid exclusive.
-            maid_name: str =  '', # o
-            run_phase: RunPhase = RunPhase.NORMAL, # o
-            is_default: bool = False, # o
+            maid_name: str =  '',
+            run_phase: RunPhase = RunPhase.NORMAL,
+            is_default: bool = False,
             # Task exclusive.
-            inputs: Sequence[T] | None = None, # o
-            required_tasks: Sequence[Callable[[], 'Task']] | None = None, # o
-            required_files: Sequence[str] | None = None, # o
-            targets: Sequence[str] | None = None, # o
-            cache: maid.cache.CacheType = maid.cache.CacheType.NONE, # o
+            inputs: Sequence[Any] = tuple(),
+            required_tasks: Sequence[TaskBuilder] = tuple(),
+            required_files: Sequence[str] = tuple(),
+            targets: Sequence[str] = tuple(),
+            cache: maid.cache.CacheType = maid.cache.CacheType.NONE,
             build_task: Callable[['Task'], None] | None = None,
-            script_stream: IO | None = None, # o
+            script_stream: IO | None = None,
             output_stream: IO | None = None, # o
             delete_targets_on_error: bool = True, #o
             dont_run_if_all_targets_exist: bool = False, # o
