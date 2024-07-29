@@ -6,7 +6,7 @@ import subprocess
 from typing import Optional, Any, Sequence, IO, Callable, Final, Self, Generator, Iterable, Never, Mapping, assert_never, cast
 
 import maid.cache.cacher
-import maid.cache.cache_types
+import maid.cache
 import maid.files
 import maid.compose.base
 import maid.error_utils
@@ -201,7 +201,7 @@ class Task(maid.compose.base.DependencyGraphTask):
             required_tasks: Sequence[Callable[[], 'Task']] | None = None, # o
             required_files: Sequence[str] | None = None, # o
             targets: Sequence[str] | None = None, # o
-            cache: maid.cache.cache_types.CacheType = maid.cache.cache_types.CacheType.NONE, # o
+            cache: maid.cache.CacheType = maid.cache.CacheType.NONE, # o
             build_task: Callable[['Task'], None] | None = None,
             script_stream: IO | None = None, # o
             output_stream: IO | None = None, # o
