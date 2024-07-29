@@ -1,5 +1,5 @@
 import itertools
-from typing import Iterable, Final, Iterator
+from typing import Iterable, Final, Iterator, Any
 
 import maid.compose.tasks
 
@@ -32,16 +32,16 @@ class _Maid:
                 )
         return '\n'.join(map(lambda t: t.dry_run(verbose), tasks))
 
-    def _run[T](
+    def _run(
             self,
             tasks: Iterable[maid.compose.tasks.Task],
             capture_outputs: bool = True,
-            ) -> Iterator[Iterable[T]]:
-        outputs: Iterator[Iterable[T]] = map(maid.compose.tasks.Task.run, tasks)
-        empty_iter: Iterator[Iterable[T]] = filter(lambda _: False, outputs)
+            ) -> Iterator[Iterable[Any]]:
+        outputs: Iterator[Iterable[Any]] = map(maid.compose.tasks.Task.run, tasks)
+        empty_iter: Iterator[Iterable[Any]] = filter(lambda _: False, outputs)
         return outputs if capture_outputs else iter(list(empty_iter))
 
-    def run[T](self, task_name: str = '') -> Iterable[T]:
+    def run(self, task_name: str = '') -> Iterable[Any]:
         try:
             _ = self._run(self._start_tasks.values(), capture_outputs=False)
             return next(self._run([self._get_task(task_name)]))
