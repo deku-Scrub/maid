@@ -1,3 +1,4 @@
+from abc import abstractmethod
 from typing import Self, Sequence, Never, Final, Mapping, Callable
 
 import maid.cache
@@ -26,9 +27,6 @@ class DependencyGraphTask:
         self.dont_run_if_all_targets_exist: Final[bool] = dont_run_if_all_targets_exist
         self.cache: Final[maid.cache.CacheType] = cache
 
+    @abstractmethod
     def dry_run(self, verbose: bool = False) -> str:
         return ''
-
-    def run[T](self) -> Sequence[T]:
-        print('{}'.format('running task')) 
-        return tuple()
