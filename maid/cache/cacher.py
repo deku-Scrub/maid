@@ -3,7 +3,7 @@ from typing import Sequence, Final
 
 import maid.cache.filehash
 import maid.cache.timestamp
-import maid.cache.cache_types
+import maid.cache
 import maid.compose.base
 import maid.files
 
@@ -16,11 +16,11 @@ class TaskCacher:
     def cache_targets(self) -> None:
         '''
         '''
-        if self._task.cache == maid.cache.cache_types.CacheType.HASH:
+        if self._task.cache == maid.cache.CacheType.HASH:
             # Cache everything because required files might have
             # been missing.
             self.cache_all()
-        elif self._task.cache == maid.cache.cache_types.CacheType.TIME:
+        elif self._task.cache == maid.cache.CacheType.TIME:
             _update_files(self._task.cache, self._task.targets)
 
     def cache_all(self) -> None:
@@ -37,14 +37,14 @@ class TaskCacher:
             return True, ''
 
         # Checks based on cache type.
-        if self._task.cache == maid.cache.cache_types.CacheType.NONE:
+        if self._task.cache == maid.cache.CacheType.NONE:
             return False, 'uncached task'
         return self._is_cached()
 
     def _is_cached(self) -> tuple[bool, str]:
         # Get appropriate decision function.
         should_task_run = maid.cache.filehash.should_task_run
-        if self._task.cache == maid.cache.cache_types.CacheType.TIME:
+        if self._task.cache == maid.cache.CacheType.TIME:
             should_task_run = maid.cache.timestamp.should_task_run
 
         if should_task_run(self._task):
@@ -53,12 +53,12 @@ class TaskCacher:
 
 
 def _update_files(
-        cache: maid.cache.cache_types.CacheType,
+        cache: maid.cache.CacheType,
         filenames: Sequence[str],
         ) -> None:
-    if cache == maid.cache.cache_types.CacheType.TIME:
+    if cache == maid.cache.CacheType.TIME:
         maid.cache.timestamp.touch_files(maid.files.get_filenames(filenames))
-    elif cache == maid.cache.cache_types.CacheType.HASH:
+    elif cache == maid.cache.CacheType.HASH:
         maid.cache.filehash.make_hashes(maid.files.get_filenames(filenames))
 
 

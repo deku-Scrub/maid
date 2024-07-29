@@ -1,6 +1,6 @@
 from typing import Self, Sequence, Never, Final, Mapping, Callable
 
-import maid.cache.cache_types
+import maid.cache
 
 
 class DependencyGraphTask:
@@ -12,7 +12,7 @@ class DependencyGraphTask:
             required_tasks: Sequence[Callable[[], 'DependencyGraphTask']] | None = None, # o
             required_files: Sequence[str] | None = None, # o
             targets: Sequence[str] | None = None, # o
-            cache: maid.cache.cache_types.CacheType = maid.cache.cache_types.CacheType.NONE,
+            cache: maid.cache.CacheType = maid.cache.CacheType.NONE,
             dont_run_if_all_targets_exist: bool = False,
             ):
         self.name: Final[str] = name
@@ -24,7 +24,7 @@ class DependencyGraphTask:
         self.targets: Final[tuple[str, ...]] = tuple(targets) if targets else tuple()
 
         self.dont_run_if_all_targets_exist: Final[bool] = dont_run_if_all_targets_exist
-        self.cache: Final[maid.cache.cache_types.CacheType] = cache
+        self.cache: Final[maid.cache.CacheType] = cache
 
     def dry_run(self, verbose: bool = False) -> str:
         return ''
