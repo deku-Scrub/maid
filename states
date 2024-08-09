@@ -1,0 +1,342 @@
+The task graph is a directed acyclic graph with nodes represented as
+tasks and directed edges from a source task to destination task if the
+destination task requires the source task to have completed its work
+before it can begin working.  Each task has a set of required files
+and tasks it needs in order to run.  These are the tasks's inputs.
+A task produces outputs in the form of files called targets.  Given a
+root task to run, it will only do so if every task it depends on, either
+directly or indirectly along any path of arbitrary length from the root,
+has finished its job.
+
+```
+Edge t0 -> t1 exists iff t1 depends on t0.
+tj: files x tasks -> files; input files are "required files,"
+                            input tasks are "required tasks,"
+                            output files are "targets."
+```
+
+From the root, the graph is traversed until it reaches a task that
+depends only on required files, not on other tasks.  These are
+leaf tasks.  Paths to all leaf tasks reachable from the root are
+traversed in a depth first manner.  Traversal from a leaf back to
+the root proceeds by sequentially visiting each task, ensuring
+that the task currently visited has successfully completed before
+visiting the next task.  How this is ensured requires a state transition
+graph that is the topic of what follows.
+
+```
+Given a task t:
+traverse(t) = S(t, required_files); t depends on no tasks (no incoming edges)
+traverse(t) = S(t, required_files, traverse(t_j), ..., traverse(t_k));
+              edges t_j -> t, ..., t_k -> t exist.
+S(t) = S(t, [])
+S(t, inputs) = {
+    A(t, inputs), if T(inputs);
+    X(t, inputs), if target = "unknown" for any target of t;
+    B(t, targets), otherwise.
+}
+T(inputs) = any inputs are in state "changed"
+A(t, inputs) = A1(required_files), X(t, inputs)
+A1(required_files) = {
+    t = "unknown" | t's a target of any task depending on a required_file,
+    r = "unchanged" | r in required_files and r = "changed."
+}
+X(t, inputs) = {
+    B(t, X1(t(inputs))), if grouped;
+    B(t, X1(t_1(inputs)), ..., X1(t_n(inputs)))
+        | target t_j != "unknown", otherwise.
+}
+X1(targets | t in targets is "unknown") = {
+    t = "changed" | t in targets and is modified;
+    t = "unchanged" | t in targets and is not modified.
+}
+B(t, targets if all targets are in a known state) = {
+    B3(targets), if any target = "changed" and t is the root;
+    B2(targets), if all targets = "unchanged";
+    B1(targets), if any target = "changed".
+}
+B1(targets) = targets
+B2(outputs) = nothing
+B3(outputs) = nothing
+```
+
+Each target file can be in one of three states:
+
+1) changed
+2) unchanged
+3) unknown
+
+The "unchanged" state represents the terminal state in which
+any tasks depending on the target file need not execute.
+
+The "changed" state requires dependent tasks to execute.  The
+task that generates the changed target file need not run again.
+
+The "unknown" state requires the task that generates the target
+file to run agan.
+
+Required files can only be in two states: "changed" and "unchanged."
+The "unknown" state does not apply because they are not generated
+by tasks.
+
+During traversal of the task graph, when a required file is found that
+is in the "changed" state, all targets are set to the "unknown" state.
+Only after this is the state of the required file set to "unchanged."
+This prevents targets that have transitioned to the "unchanged" state
+from needless regeneration if generating another target produces an error.
+
+```A
+rf[changed] -> t[unknown] -> rf[unchanged]
+```
+
+More generally, when a file is required by multiple tasks and is in the
+"changed" state, then all targets across all those tasks are transitioned
+to the "unknown" state.  Once these transitions are complete, the
+required file moves to the "unchanged" state.
+
+```B
+rf[changed] -> t_1[unknown] -> ... -> t_n[unknown] -> rf[unchanged]
+```
+
+After this, the tasks associated with each "unknown" target are
+executed.  Upon successful execution, states are set to "unchanged."
+A failed execution maintains the "unknown" state so that the task
+is rerun after restarting the workflow.
+
+```
+rf[changed] -> t_j[unknown] -> failure -> t_j[unknown]
+```
+
+If, after failing, a target's required files change, then no special
+case is required since the aformentioned case of a required file
+change covers this case as well.
+
+```
+rf[changed] -> t_j[unknown] -> failure -> rf[changed] -> B
+```
+
+When a task completes -- all targets were created successfuly --
+its targets are in either the "changed" or "unchanged" state.
+For the purpose of determining whether or not a dependent task
+should execute, these targets can be considered as required files,
+thus the aforementioned cases apply without the need for new ones.
+
+Generalizing further, if multiple required files have changed,
+then the union of all targets that directly depend on at least
+one are set to the "unknown" state.  Once this is done, the
+states of all required files are set to "unchanged."
+
+```C
+rf_1[changed]                                        -> rf_1[unchanged]
+...          \                                      /
+rf_j[changed] -> t_1[unknown] -> ... -> t_n[unknown] -> rf_j[unchanged]
+...          /                                      \
+rf_m[changed]                                        -> rf_m[unchanged]
+```
+
+The state transitions in this generalized scenario follow the same
+rules as in the less generalized ones.
+
+Since the set of targets can encompass multiple tasks, this ensures
+every task directly depending on any modified required file will run.
+The output of successfully executing every task is a set of files
+with new states (either "changed" or "unchanged"); that is, a set
+of files required by other tasks.  Thus the same process is applied
+for those tasks.
+
+Aggregating all this information, the conditions to run a task are:
+
+* any of its required files is in the "changed" state, or
+* any of its targets is in the "unknown" state.
+
+Files can be in one of the following states:
+
+* changed,
+* unchanged,
+* unknown.
+
+Every state except "unknown" are collectively referred to as "known."
+
+Tasks can be in one of the following states:
+
+* Tj
+  * there exists a rf[changed] in task `j`
+* A
+  * all t[unknown] and rf[unchanged]
+  * all targets `t` depending on required file `rf` are in
+    the "unknown" state simultaneously as `rf` is in the "unchanged"
+    state.  None are being generated.
+* X
+  * there exists a t[unknown] and a t[known]
+  * some targets are in the "unknown" state while others are in the
+    other states.  The task is generating targets.
+* B1
+  * all t[known] and there exists t[changed]
+  * all targets are either in the "unchanged" or "changed" states,
+    there being at least one of each.  The task has finished
+    generating targets.
+* B2
+  * all t[unchanged]
+  * all targets are in the "unchanged" state.  The task has finished
+    generating targets.
+* B3
+  * same as B1 except the current task is the root.
+* E
+  * Same as X but there has been an error in generating at least
+    one target.
+
+The possible transitions are:
+
+* Tj -> A
+* A -> X
+* X -> E
+* X -> B1
+* X -> B2
+* X -> B3
+* E -> X
+* E -> Tk, k <= j
+* B1 -> Tj+1
+
+Although B1 and B3 represent the same logical state, there cannot
+be a change out of B3 because only the root reaches that state,
+thus there are no more tasks Tj+1 to transition to.  No special
+changes of file state are needed here because if a new workflow
+was started from a different root but that includes the previous
+root, then tasks depending on the previous root will correctly
+be executed.  If all the files were set to "unchanged," resulting
+in a transition to B2, then no dependent task would run despite
+files having changed.
+
+Start state Tj disregards the state of target files.  This allows
+transitioning to any Tk for k <= j if Tj experiences an error and the
+resolution requires modifying a required file from a task Tj directly
+or indirectly depends on.
+
+The error state E can transition to the execution state X, bypassing
+the start state Tj.  This allows continuing the current task when
+the error was not caused by a required file, but rather something
+external to the task, such as an operating system failure or power
+failure.
+
+The final states B1, B2, and B3 denote those in which the task has
+been successfully executed and all targets and they all are in
+a known state.  For this, state X cannot change the state of a
+target to a known state unless the task has successfully executed
+and the target exists.  If X transitions to E, then the state of
+a target remains "unknown."  No removal of potentially corrupt
+targets is needed because a target's existence is not sufficient
+to know that it was generated without error; the target's state
+must also be a known state.
+
+The preparatory state A transitions files to states such that state
+X can be visited and the task executed.  All target states are first
+transitioned to "unknown," followed by a transition to "unchanged"
+for all required files.  The first change allows the task to know
+which targets to execute on.  The second change is an acknowledgement
+that required files have changed and that an action has been taken
+to move onwards towards the next step.  If A is ever revisited without
+any changes to required files (currently impossible), there is no
+need to reset the state of any targets; state moves onto X which
+executes any "unknown" targets.
+
+Boundary cases include the following:
+
+* missing required files
+* missing targets
+* initial state of the system
+  * no targets might exist
+
+Since required files must exist, the absence of any is a violation
+of the system's assumptions, thus the workflow will not run.  Missing
+targets are assigned to the "unknown" state so that their tasks must
+generate them.  Combining these two forms a solution to the initial
+state: all required files must exist and all targets are in the
+"unknown" state.  Equivalently, all required files exist and begin
+in the "changed" state.
+
+The initial tasks T0 are leaf tasks -- those that depend only on
+required files and not any task.  By traversing the graph from a
+given task, all reachable initial tasks are visited first, resulting
+in a set of initial tasks.  Then processing proceeds back to the
+root following the state transitions.
+
+Errors are possible in any state.  When one occurs, execution
+must resume at either the failed state or a previous state.
+
+The state T can fail if the evaluation of its predicate is interrupted
+(for example, power failure or missing inputs).  Since T makes
+no changes to file states, the workflow will resume at T until the
+error is solved.
+
+State A fails similarly to T.  The output of A is a state change
+where are targets are "unknown" and all required files are "unchanged."
+Since the states of targets are modified before those of required
+files, a failure in modifying target states means at least one
+required file is "changed."  Thus, in a restart of the workflow,
+the previous state T will evaluate to true and A will run again.
+Errors modifying the state of required files result in at least
+one state remaining "changed."  Thus, T will evalute to true in
+the next run of the workflow, and A will be revisited.
+
+Errors in state X can occur in evaluating `t(inputs)` or afterwards
+when changing the states of the targets.  Since all file states
+start as "unknown," on entry to X, and no state is changed until
+`t` successfully finishes, an error evaluating `t` preserves the
+"unknown" state of targets.  Thus, when rerunning the workflow,
+`t` must run again.  Similarly, an error modifying the state from
+"unknown" to a known state maintains the "unknown" state, therefore
+X will execute upon restarting the workflow.
+
+An error in state B occurs if a target is missing.  When true, a
+restart of the workflow will not transition past B but re-execute
+it, regardless of whether or not the missing targets are still so.
+
+The state of the workflow that had not reached a terminal state
+might change through manual intervention of a user.  This could
+happen, for example, between workflow runs during a resolution
+of an error.  If the workflow crashes in state A, then manual
+intervention might set all inputs to the "unchanged" state, meaning
+T will evaluate to false and A will not re-execute; instead, the
+workflow will visit the next task.  Similary, after an error in
+state X, manual changes of state to the required files or targets
+could result in the next run of the workflow bypassing the current
+task and visiting the next one.  This is problematic because an
+error should only cause the workflow to start at or behind the
+state of the previous task.  To mitigate this, the state needs to
+be saved after every operation that changes it (in case of errors),
+which can be prohibitivaly expensive.  This also makes it impossible
+for a user to fix errors because the error state will always be
+loaded, ignoring changes that preserve the validity of the workflow.
+There could be a way to determine if a manual change preserves
+the validity, that is, causes the workflow to begin at or before
+the previous state.  This would also involve saving state after
+certain operations, though at a coarser and therefore more performant
+level.  Specifically, the set of currently visited tasks is saved
+when transitioning to a new task.  Then, when the workflow is
+executed, it checks that the set of start tasks contains no
+task that occurs after the saved set.  In other words, no start
+task depends on a saved task.  This is slightly complicated by
+the fact that a saved task can depend on another saved task, but
+might be solvable by considering only the subgraph where the saved
+tasks are roots.  If a start task in the new workflow does not
+exist in the subgraph, then the manual state changes were invalid.
+This approach adds minimal overhead to the workflow execution outline
+above.  To the traversal is added a check at each task that a saved
+task has not been passed.  Note this is only a problem when running
+the same workflow with the same root node as the previous run.  With
+that restriction, paths can be saved, and the next invocation of
+the workflow would have to travel along the same paths as the previous
+invocation.  If this is not true, then the manual state changes were
+invalid -- maybe.  The user could have intentionally created a new
+workflow for whatever reason: a solution to an error, new functionality,
+optimization, etc.  These complications probably suggest that
+checking for invalid manual state changes is not worth pursuing --
+the changes could in fact be valid.  The problem of knowing the
+validity of a manual state change is undecidable.  It is only
+decidable in the context of an automated workflow run where there
+are clearly defined rules for state transitions followed mechanically
+by an algorithm.
+
+Manual state changes by the user.
+Boundary errors on exit after main computation is done.
+Improperly visiting a state when the assumptions to visit it are invalid.
