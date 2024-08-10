@@ -24,40 +24,111 @@ that the task currently visited has successfully completed before
 visiting the next task.  How this is ensured requires a state transition
 graph that is the topic of what follows.
 
+A task stores a set of inputs containing their states the last time
+the task was run.  If, when visiting a task, the observed set of
+states does not match the stored set, then the task runs.  Otherwise,
+the task does not run.
+
 ```
+data task:
+    targets: [str]
+    required_files: [str]
+    required_tasks: [task]
+    stored_inputs: {str}
+    target_states: [str]
+    grouped: bool
+    state: bool
+    remove_targets_on_failure: bool
+    delay_failures: bool
+    cache: CacheType
+    script_stream: IO
+    output_stream: IO
+    dont_run_if_all_targets_exist: bool
+    run_phase: RunPhase
+    is_default: bool
+    inputs: _ -> [str] = required_files + [tj.targets | tj in required_tasks]
+mut data maid:
+    start_tasks: [task]
+    end_tasks: [task]
+    normal_tasks: [str -> task]
+    finally_tasks: [task]
+    default_task: task
+    dry_run(): _ -> str = dry_run(default_task)
+    dry_run(t): task -> str = {
+        join(dry_run(tj)) | tj in start_tasks
+                                  + [normal_tasks[t]]
+                                  + end_tasks
+                                  + finally_tasks
+    }
+    run(): _ -> _ = run(default_task)
+    run(t): task -> _ = {
+        x = run(tj) | tj in start_tasks + [normal_tasks[t]] + end_tasks
+        run(tj) | tj in finally_tasks
+        panic if x == error or x == panic
+        x
+    }
+    add_task(t) = {
+        default_task = t, t.is_default
+                          and not default_task
+                          and t.run_phase == "normal";
+        panic, t.is_default;
+        normal_tasks[t.name] = t, t.run_phase == "normal";
+        start_tasks.append(t), t.run_phase == "start";
+        end_tasks.append(t), t.run_phase == "end";
+        finally_tasks.append(t), t.run_phase == "finally";
+    }
 Given a task t:
-traverse(t) = S(t, required_files); t depends on no tasks (no incoming edges)
-traverse(t) = S(t, required_files, traverse(t_j), ..., traverse(t_k));
-              edges t_j -> t, ..., t_k -> t exist.
-S(t) = S(t, [])
-S(t, inputs) = {
-    A(t, inputs), if T(inputs);
-    X(t, inputs), if target = "unknown" for any target of t;
-    B(t, targets), otherwise.
+dry_run(t) = (dry_run(tj) | tj in t.required_tasks) + str(t)
+run(t) = {
+    E1(S(t)), E1([run(t_j) | t_j in t.required_tasks]) != [],
+    E1(S(t)), otherwise
 }
-T(inputs) = any inputs are in state "changed"
-A(t, inputs) = A1(required_files), X(t, inputs)
-A1(required_files) = {
-    t = "unknown" | t's a target of any task depending on a required_file,
-    r = "unchanged" | r in required_files and r = "changed."
+S(t) = {
+    [], D(t),
+    A(t), if T(C(t.inputs(), t.cache_type), t.stored_inputs);
+    X(t), if t.state == "unknown";
+    [], otherwise,
 }
-X(t, inputs) = {
-    B(t, X1(t(inputs))), if grouped;
-    B(t, X1(t_1(inputs)), ..., X1(t_n(inputs)))
-        | target t_j != "unknown", otherwise.
+D(t) = t.dont_run_if_all_targets_exist and all t.targets exist
+T(inputs, stored_inputs) = inputs != stored_inputs
+A(t) = X(A1(t))
+A1(t) = {
+    task(
+        **t,
+        state="unknown",
+        target_states=if t.grouped then all "unknown" else all "known",
+        stored_inputs=C(t.inputs(), t.cache),
+    )
 }
-X1(targets | t in targets is "unknown") = {
-    t = "changed" | t in targets and is modified;
-    t = "unchanged" | t in targets and is not modified.
+C(x, cache_type) = {
+    [hash(xj) | xj in sort(x)], if cache_type == 'hash';
+    [time(xj) | xj in sort(x)], if cache_type == 'time';
 }
-B(t, targets if all targets are in a known state) = {
-    B3(targets), if any target = "changed" and t is the root;
-    B2(targets), if all targets = "unchanged";
-    B1(targets), if any target = "changed".
+X(t) = {
+    X2(E(P(t)), t), if grouped;
+    X2(X1(E(P(t_j)), t_j) | target t_j == "unknown"), otherwise.
 }
-B1(targets) = targets
-B2(outputs) = nothing
-B3(outputs) = nothing
+P(t) = {
+    print(t) if t.script_stream
+    disable output if not t.output_stream
+    t()
+}
+E(t, x) = {
+    enable output if not t.output_stream
+    x, if no error
+    remove(t.targets) if t.remove_targets_on_failure
+    error, if t.delay_failures;
+    panic, otherwise.
+}
+E1(t, x) = if no error then x else panic
+X1(output, target) = {
+    target.state = "known", if output != error
+    output
+}
+X2(output, t) = {
+    t.state = "known", if output != error
+    output
+}
 ```
 
 Each target file can be in one of three states:
