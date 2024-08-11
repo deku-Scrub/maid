@@ -71,7 +71,9 @@ class Task:
         return self.recipe(self).run()
 
     def run(self) -> Optional[Exception]:
-        return run(self, set())
+        if (err := run(self, set())):
+            traceback.print_exception(err)
+            raise err
 
     def dry_run(self) -> str:
         return dry_run(self, set())
