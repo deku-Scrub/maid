@@ -25,14 +25,18 @@ class _Maid:
                         }
 
     def dry_run(self, task_name: str = '', verbose: bool = False) -> str:
-        return '\n'.join(
+        match '\n'.join(
                 t.dry_run() for t in itertools.chain(
                     self._task_graph[maid.tasks.RunPhase.START].values(),
                     (self._get_task(task_name),),
                     self._task_graph[maid.tasks.RunPhase.END].values(),
                     self._task_graph[maid.tasks.RunPhase.FINALLY].values(),
                     )
-                )
+                ):
+            case '':
+                return 'No tasks will run.  All are up to date.'
+            case _ as x:
+                return x
 
     def _try_run(
             self,
