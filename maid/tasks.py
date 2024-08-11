@@ -255,7 +255,9 @@ def cache_files(
     if not outfile:
         return ''
     with open(outfile, mode='wt', encoding='utf-8') as fos:
-        fos.writelines(hash_files(sorted(filenames), cache_type))
+        fos.writelines(
+                (f'{h}\n' for h in hash_files(sorted(filenames), cache_type)),
+                )
     return next(iter(hash_files((outfile,), cache_type)))
 
 
