@@ -91,11 +91,38 @@ def unvisited_tasks(task: Task, visited: set[str]) -> Iterable[Task]:
     yield from (t for t in task.required_tasks if t.name not in visited)
 
 
+def _format_dry_run(
+        prev_runs: Iterable[str],
+        task: Task,
+        reason_to_run: str,
+        ) -> str:
+    return '{previous_runs}\n{this_run}'.format(
+            previous_runs='\n'.join(prev_runs),
+            this_run=(
+                '########################################################\n'
+                '# Task `{}` will run ({})\n'
+                '########################################################\n'
+                '{}\n'
+                ).format(task.name, reason_to_run, str(task)),
+            )
+
+
 def dry_run(task: Task, visited: set[str]) -> str:
     visited.add(task.name)
-    return '\n'.join(
-            dry_run(t, visited) for t in unvisited_tasks(task, visited)
-            ) + str(task)
+    prev_runs = (dry_run(t, visited) for t in unvisited_tasks(task, visited))
+    if should_run(task):
+        return _format_dry_run(
+                prev_runs,
+                task,
+                'required files/tasks are modified'
+                )
+    if is_queued(task.name):
+        return _format_dry_run(
+                prev_runs,
+                task,
+                'previous run did not finish'
+                )
+    return ''
 
 
 def run(task: Task, visited: set[str]) -> Optional[Exception]:
