@@ -110,13 +110,7 @@ def S(task: Task) -> Optional[Exception]:
         return A(task)
     if is_queued(task.name):
         return X(task)
-    if N(task):
-        return X(task)
     return None
-
-
-def N(task: Task) -> bool:
-    return task.cache_type == CacheType.NONE
 
 
 def D(task: Task) -> bool:
@@ -127,7 +121,9 @@ def D(task: Task) -> bool:
 
 
 def T(task: Task) -> bool:
-    return task.get_actual_inputs() != task.get_stored_inputs()
+    if task.get_actual_inputs() != task.get_stored_inputs():
+        return True
+    return task.cache_type == CacheType.NONE
 
 
 def A(task: Task) -> Optional[Exception]:
