@@ -1,4 +1,5 @@
 import traceback
+import base64
 import os
 import sys
 import io
@@ -47,17 +48,14 @@ class Task:
     def get_stored_inputs(self) -> str:
         if not self.name:
             return ''
-        return hash_file(
-                os.path.join(self.hash_dirname, 'tasks', self.name),
-                self.cache_type,
-                )
+        return hash_file(to_state_file(self), self.cache_type)
 
     def get_actual_inputs(self) -> str:
         if not self.name:
             return ''
         return cache_files(
                 expand_requirements(self),
-                os.path.join(self.hash_dirname, 'tasks', self.name + '.new'),
+                to_state_file(self, suffix='.new'),
                 self.cache_type,
                 )
 
@@ -141,8 +139,8 @@ def setup_file_states(task: Task) -> Optional[Exception]:
     if err:
         return err
     return try_function(lambda: shutil.move(
-        os.path.join(task.hash_dirname, 'tasks', task.name + '.new'),
-        os.path.join(task.hash_dirname, 'tasks', task.name),
+        to_state_file(task, suffix='.new'),
+        to_state_file(task),
         ))
 
 
@@ -154,13 +152,34 @@ def try_function(f: Callable[[], Any]) -> Optional[Exception]:
         return err
 
 
+def to_state_file(obj: str | Task, suffix: str = '') -> str:
+    if isinstance(obj, str):
+        return _filename_to_state_file(obj + suffix, 'targets')
+    if isinstance(obj, Task):
+        return _filename_to_state_file(obj.name + suffix, 'tasks')
+    else:
+        raise RuntimeError('Unknown type given to `to_state_file`.  Only `str` and `Task` are accepted.')
+
+
+def _filename_to_state_file(filename: str, dirname: str) -> str:
+    return os.path.join(
+            '.maid',
+            dirname,
+            base64.b64encode(filename.encode('utf-8')).decode('utf-8'),
+            )
+
+
 def dequeue_files(filenames: Iterable[str]) -> Optional[Exception]:
-    return try_function(lambda: find_error(os.remove(f) for f in filenames))
+    return try_function(
+            lambda: find_error(os.remove(to_state_file(f)) for f in filenames),
+            )
 
 
 def queue_files(filenames: Iterable[str]) -> Optional[Exception]:
     return try_function(
-            lambda: find_error(pathlib.Path(f).touch() for f in filenames)
+            lambda: find_error(
+                pathlib.Path(to_state_file(f)).touch() for f in filenames
+                ),
             )
 
 
@@ -223,7 +242,7 @@ def execute(task: Task, target: str = '') -> Optional[Exception]:
 
 
 def is_queued(filename: str) -> bool:
-    return os.path.exists(filename)
+    return os.path.exists(to_state_file(filename))
 
 
 def expand_globs(filenames: Iterable[str]) -> Iterable[str]:
