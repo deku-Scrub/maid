@@ -128,7 +128,7 @@ def dry_run(task: Task, visited: set[str]) -> str:
         return _format_dry_run(
                 prev_runs,
                 task,
-                'required files/tasks are modified'
+                'required files/tasks/targets are modified'
                 )
     if is_queued(task.name):
         return _format_dry_run(
@@ -164,6 +164,8 @@ def should_not_run(task: Task) -> bool:
 
 def should_run(task: Task) -> bool:
     if task.get_actual_inputs() != task.get_stored_inputs():
+        return True
+    if any(not os.path.exists(f) for f in expand_globs(task.targets)):
         return True
     return task.cache_type == CacheType.NONE
 
