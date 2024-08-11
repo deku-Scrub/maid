@@ -55,7 +55,7 @@ class Task:
     def get_actual_inputs(self) -> str:
         if not self.name:
             return ''
-        return C(
+        return cache_files(
                 expand_requirements(self),
                 os.path.join(self.hash_dirname, 'tasks', self.name + '.new'),
                 self.cache_type,
@@ -102,38 +102,38 @@ def dry_run(task: Task, visited: set[str]) -> str:
 
 def run(task: Task, visited: set[str]) -> Optional[Exception]:
     visited.add(task.name)
-    err = E1(run(t, visited) for t in unvisited_tasks(task, visited))
-    return err if err else E1((S(task),))
+    err = find_error(run(t, visited) for t in unvisited_tasks(task, visited))
+    return err if err else find_error((start_state_machine(task),))
 
 
-def S(task: Task) -> Optional[Exception]:
-    if D(task):
+def start_state_machine(task: Task) -> Optional[Exception]:
+    if should_not_run(task):
         return None
-    if T(task):
-        return A(task)
+    if should_run(task):
+        return start_run(task)
     if is_queued(task.name):
-        return X(task)
+        return start_execution(task)
     return None
 
 
-def D(task: Task) -> bool:
+def should_not_run(task: Task) -> bool:
     return (
             task.dont_run_if_all_targets_exist
             and all(os.path.exists(t) for t in expand_globs(task.targets))
             )
 
 
-def T(task: Task) -> bool:
+def should_run(task: Task) -> bool:
     if task.get_actual_inputs() != task.get_stored_inputs():
         return True
     return task.cache_type == CacheType.NONE
 
 
-def A(task: Task) -> Optional[Exception]:
-    return err if (err := A1(task)) else X(task)
+def start_run(task: Task) -> Optional[Exception]:
+    return err if (err := setup_file_states(task)) else start_execution(task)
 
 
-def A1(task: Task) -> Optional[Exception]:
+def setup_file_states(task: Task) -> Optional[Exception]:
     err = queue_files(itertools.chain(
         (task.name,),
         tuple() if task.grouped else expand_globs(task.targets),
@@ -155,11 +155,13 @@ def try_function(f: Callable[[], Any]) -> Optional[Exception]:
 
 
 def dequeue_files(filenames: Iterable[str]) -> Optional[Exception]:
-    return try_function(lambda: E1(os.remove(f) for f in filenames))
+    return try_function(lambda: find_error(os.remove(f) for f in filenames))
 
 
 def queue_files(filenames: Iterable[str]) -> Optional[Exception]:
-    return try_function(lambda: E1(pathlib.Path(f).touch() for f in filenames))
+    return try_function(
+            lambda: find_error(pathlib.Path(f).touch() for f in filenames)
+            )
 
 
 def hash_file(filename: str, cache_type: CacheType) -> str:
@@ -185,7 +187,7 @@ def hash_files(
     yield from (hash_file(f, cache_type) for f in filenames)
 
 
-def C(
+def cache_files(
         filenames: Iterable[str],
         outfile: str,
         cache_type: CacheType,
@@ -197,12 +199,12 @@ def C(
     return next(iter(hash_files((outfile,), cache_type)))
 
 
-def X(task: Task) -> Optional[Exception]:
+def start_execution(task: Task) -> Optional[Exception]:
     if task.grouped:
-        return X1(E(P(task), task), task.name)
-    return X2(
+        return execute(task)
+    return cleanup_states(
             (
-                X1(E(P(task, target), task), target)
+                execute(task, target)
                 for target in expand_globs(task.targets)
                 if is_queued(target)
                 ),
@@ -210,16 +212,18 @@ def X(task: Task) -> Optional[Exception]:
             )
 
 
+def execute(task: Task, target: str = '') -> Optional[Exception]:
+    return cleanup_state(
+            handle_error(
+                try_function(lambda: task.run_recipe(target)),
+                task,
+                ),
+            target if target else task.name,
+            )
+
+
 def is_queued(filename: str) -> bool:
     return os.path.exists(filename)
-
-
-def P(task: Task, target: str = '') -> Optional[Exception]:
-    try:
-        _ = task.run_recipe(target)
-        return None
-    except Exception as err:
-        return err
 
 
 def expand_globs(filenames: Iterable[str]) -> Iterable[str]:
@@ -231,13 +235,13 @@ def expand_globs(filenames: Iterable[str]) -> Iterable[str]:
 
 
 def remove_files(filenames: Iterable[str]) -> Optional[Exception]:
-    return E1(
+    return find_error(
             os.remove(f) if os.path.isfile(f) else shutil.rmtree(f)
             for f in filenames
             )
 
 
-def E(error: Optional[Exception], task: Task) -> Optional[Exception]:
+def handle_error(error: Optional[Exception], task: Task) -> Optional[Exception]:
     if not error:
         return None
     if task.remove_targets_on_failure:
@@ -256,16 +260,19 @@ def to_error(lhs: object, rhs: object) -> Optional[Exception]:
     return None
 
 
-def E1(outputs: Iterable[object]) -> Optional[Exception]:
+def find_error(outputs: Iterable[object]) -> Optional[Exception]:
     return functools.reduce(to_error, outputs, None)
 
 
-def X1(error: Optional[Exception], filename: str) -> Optional[Exception]:
+def cleanup_state(
+        error: Optional[Exception],
+        filename: str,
+        ) -> Optional[Exception]:
     return error if error else dequeue_files((filename,))
 
 
-def X2(
+def cleanup_states(
         errors: Iterable[Optional[Exception]],
         filename: str,
         ) -> Optional[Exception]:
-    return err if (err := E1(errors)) else dequeue_files((filename,))
+    return err if (err := find_error(errors)) else dequeue_files((filename,))
