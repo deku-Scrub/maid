@@ -12,7 +12,7 @@ import dataclasses
 from dataclasses import dataclass, field
 from typing import Optional, Iterable, Sequence, Callable, Any, Final
 
-import maid2.compose
+import maid.compose
 
 
 class CacheType(enum.Enum):
@@ -30,7 +30,7 @@ class RunPhase(enum.Enum):
 
 @dataclass(frozen=True, kw_only=True)
 class Task:
-    recipe: Callable[['Task'], maid2.compose.Recipe] = field(kw_only=False)
+    recipe: Callable[['Task'], maid.compose.Recipe] = field(kw_only=False)
     name: str = ''
     targets: Sequence[str] = tuple()
     required_files: Sequence[str] = tuple()
