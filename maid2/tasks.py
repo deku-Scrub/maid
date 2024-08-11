@@ -120,7 +120,7 @@ def N(task: Task) -> bool:
 def D(task: Task) -> bool:
     return (
             task.dont_run_if_all_targets_exist
-            and all(os.path.exists(t) for t in task.targets)
+            and all(os.path.exists(t) for t in expand_globs(task.targets))
             )
 
 
@@ -135,7 +135,7 @@ def A(task: Task) -> Optional[Exception]:
 def A1(task: Task) -> Optional[Exception]:
     err = queue_files(itertools.chain(
         (task.name,),
-        tuple() if task.grouped else task.targets,
+        tuple() if task.grouped else expand_globs(task.targets),
         ))
     if err:
         return err
@@ -202,7 +202,7 @@ def X(task: Task) -> Optional[Exception]:
     return X2(
             (
                 X1(E(P(task, target), task), target)
-                for target in task.targets
+                for target in expand_globs(task.targets)
                 if is_queued(target)
                 ),
             task.name,
@@ -232,7 +232,7 @@ def expand_globs(filenames: Iterable[str]) -> Iterable[str]:
 def remove_files(filenames: Iterable[str]) -> Optional[Exception]:
     return E1(
             os.remove(f) if os.path.isfile(f) else shutil.rmtree(f)
-            for f in expand_globs(filenames)
+            for f in filenames
             )
 
 
@@ -240,7 +240,7 @@ def E(error: Optional[Exception], task: Task) -> Optional[Exception]:
     if not error:
         return None
     if task.remove_targets_on_failure:
-        remove_files(task.targets) 
+        remove_files(expand_globs(task.targets))
     if task.delay_failures:
         return error
     traceback.print_exception(error)
