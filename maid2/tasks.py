@@ -78,6 +78,9 @@ class Task:
     def dry_run(self) -> str:
         return dry_run(self, set())
 
+    def __str__(self) -> str:
+        return str(self.recipe(self))
+
 
 def expand_requirements(task: Task) -> Iterable[str]:
     return itertools.chain(
