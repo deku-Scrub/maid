@@ -70,7 +70,7 @@ class Task:
                     ).run_recipe()
         return self.recipe(self).run()
 
-    def run(self) -> Optional[Exception]:
+    def run(self) -> None:
         if (err := run(self, set())):
             traceback.print_exception(err)
             raise err
