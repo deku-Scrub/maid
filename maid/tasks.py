@@ -45,6 +45,20 @@ class Task:
     is_default: bool = False
     hash_dirname: str = field(default='.maid', init=False)
 
+    def __post_init__(self) -> None:
+        match next(
+                (
+                    f
+                    for f in expand_globs(self.required_files)
+                    if not os.path.exists(f)
+                    ),
+                ''
+                ):
+            case '':
+                return
+            case _ as x:
+                raise MissingRequiredFileException(self.name, x)
+
     def get_stored_inputs(self) -> str:
         if not self.name:
             return ''
@@ -272,11 +286,25 @@ def is_queued(filename: str) -> bool:
     return os.path.exists(to_state_file(filename))
 
 
+def take_from_nonempty(
+        x: Iterable[pathlib.Path],
+        y: Iterable[pathlib.Path],
+        ) -> Iterable[pathlib.Path]:
+    yield from (
+            xj if xj else yj
+            for (xj, yj)
+            in itertools.zip_longest(x, y)
+            )
+
+
 def expand_globs(filenames: Iterable[str]) -> Iterable[str]:
     yield from (
             str(f)
             for glob in filenames
-            for f in pathlib.Path('').glob(glob)
+            for f in take_from_nonempty(
+                pathlib.Path('').glob(glob),
+                (pathlib.Path(glob),)
+                )
             )
 
 
@@ -322,3 +350,17 @@ def cleanup_states(
         filename: str,
         ) -> Optional[Exception]:
     return err if (err := find_error(errors)) else dequeue_files((filename,))
+
+
+class MissingRequiredFileException(Exception):
+    '''
+    '''
+
+    def __init__(self, task_name: str, filename: str):
+        '''
+        '''
+        msg = 'Task `{}` is missing required file `{}`'.format(
+                task_name,
+                filename,
+                )
+        super().__init__(msg)
