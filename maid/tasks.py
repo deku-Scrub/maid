@@ -11,7 +11,7 @@ import functools
 import itertools
 import dataclasses
 from dataclasses import dataclass, field
-from typing import Optional, Iterable, Sequence, Callable, Any, Final
+from typing import Optional, Iterable, Sequence, Callable, Any, Final, assert_never
 
 import maid.compose
 
@@ -27,6 +27,13 @@ class RunPhase(enum.Enum):
     START = 1
     END = 2
     FINALLY = 3
+
+
+class RunReason(enum.Enum):
+    DONT_RUN = 0
+    MISSING_TARGETS = 1
+    MODIFIED_INPUTS = 2
+    NO_CACHE = 3
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -124,12 +131,23 @@ def _format_dry_run(
 def dry_run(task: Task, visited: set[str]) -> str:
     visited.add(task.name)
     prev_runs = (dry_run(t, visited) for t in unvisited_tasks(task, visited))
-    if should_run(task):
-        return _format_dry_run(
-                prev_runs,
-                task,
-                'required files/tasks/targets are modified'
-                )
+
+    match should_run(task):
+        case RunReason.MISSING_TARGETS:
+            return _format_dry_run(prev_runs, task, 'targets are missing')
+        case RunReason.MODIFIED_INPUTS:
+            return _format_dry_run(
+                    prev_runs,
+                    task, 
+                    'required files/tasks are modified',
+                    )
+        case RunReason.NO_CACHE:
+            return _format_dry_run(prev_runs, task, 'uses no cache')
+        case RunReason.DONT_RUN:
+            pass
+        case _ as unreachable:
+            assert_never(unreachable)
+
     if is_queued(task.name):
         return _format_dry_run(
                 prev_runs,
@@ -148,7 +166,7 @@ def run(task: Task, visited: set[str]) -> Optional[Exception]:
 def start_state_machine(task: Task) -> Optional[Exception]:
     if should_not_run(task):
         return None
-    if should_run(task):
+    if (reason := should_run(task)) != RunReason.DONT_RUN:
         return start_run(task)
     if is_queued(task.name):
         return start_execution(task)
@@ -162,12 +180,14 @@ def should_not_run(task: Task) -> bool:
             )
 
 
-def should_run(task: Task) -> bool:
+def should_run(task: Task) -> RunReason:
     if task.get_actual_inputs() != task.get_stored_inputs():
-        return True
+        return RunReason.MODIFIED_INPUTS
     if any(not os.path.exists(f) for f in expand_globs(task.targets)):
-        return True
-    return task.cache_type == CacheType.NONE
+        return RunReason.MISSING_TARGETS
+    if task.cache_type == CacheType.NONE:
+        return RunReason.NO_CACHE
+    return RunReason.DONT_RUN
 
 
 def start_run(task: Task) -> Optional[Exception]:
