@@ -1,7 +1,6 @@
 import traceback
 import base64
 import os
-import sys
 import io
 import enum
 import shutil
@@ -230,8 +229,7 @@ def to_state_file(obj: str | Task, suffix: str = '') -> str:
         return _filename_to_state_file(obj + suffix, 'targets')
     if isinstance(obj, Task):
         return _filename_to_state_file(obj.name + suffix, 'tasks')
-    else:
-        raise RuntimeError('Unknown type given to `to_state_file`.  Only `str` and `Task` are accepted.')
+    raise RuntimeError('Unknown type given to `to_state_file`.  Only `str` and `Task` are accepted.')
 
 
 def _filename_to_state_file(filename: str, dirname: str) -> str:
@@ -268,8 +266,7 @@ def hash_file(filename: str, cache_type: CacheType) -> str:
                 io.BytesIO(str(os.path.getmtime(filename)).encode('utf-8')),
                 hash_algo,
                 ).hexdigest()
-    else:
-        return ''
+    return ''
 
 
 def hash_files(

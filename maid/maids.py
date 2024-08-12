@@ -4,7 +4,7 @@ from typing import Optional, Iterable, Final
 import maid.tasks
 
 DEFAULT_MAID_NAME: Final[str] = 'm03'
-_maids: Final[dict[str, '_Maid']] = dict()
+_MAIDS: Final[dict[str, '_Maid']] = dict()
 
 
 class _Maid:
@@ -106,7 +106,7 @@ class _Maid:
 def get_maid(maid_name: str = DEFAULT_MAID_NAME) -> _Maid:
     if not maid_name:
         raise MaidNameException()
-    return _maids.setdefault(maid_name, _Maid(maid_name))
+    return _MAIDS.setdefault(maid_name, _Maid(maid_name))
 
 
 class UnknownRunPhaseException(Exception):
