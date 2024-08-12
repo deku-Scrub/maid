@@ -138,7 +138,7 @@ def dry_run(task: Task, visited: set[str]) -> str:
         case RunReason.MODIFIED_INPUTS:
             return _format_dry_run(
                     prev_runs,
-                    task, 
+                    task,
                     'required files/tasks are modified',
                     )
         case RunReason.NO_CACHE:
@@ -167,7 +167,7 @@ def start_state_machine(task: Task) -> Optional[Exception]:
     if should_not_run(task):
         return None
     if (reason := should_run(task)) != RunReason.DONT_RUN:
-        return start_run(task)
+        return start_run(task, reason)
     if is_queued(task.name):
         return start_execution(task)
     return None
@@ -190,21 +190,31 @@ def should_run(task: Task) -> RunReason:
     return RunReason.DONT_RUN
 
 
-def start_run(task: Task) -> Optional[Exception]:
-    return err if (err := setup_file_states(task)) else start_execution(task)
-
-
-def setup_file_states(task: Task) -> Optional[Exception]:
-    err = queue_files(itertools.chain(
-        (task.name,),
-        tuple() if task.grouped else expand_globs(task.targets),
-        ))
-    if err:
+def start_run(task: Task, reason: RunReason) -> Optional[Exception]:
+    if (err := setup_file_states(task, reason)):
         return err
-    return try_function(lambda: shutil.move(
-        to_state_file(task, suffix='.new'),
-        to_state_file(task),
-        ))
+    return start_execution(task)
+
+
+def expand_targets(task: Task, reason: RunReason) -> Iterable[str]:
+    if task.grouped:
+        return tuple()
+    if reason == RunReason.MISSING_TARGETS:
+        return (f for f in expand_globs(task.targets) if not os.path.exists(f))
+    return expand_globs(task.targets)
+
+
+def setup_file_states(task: Task, reason: RunReason) -> Optional[Exception]:
+    match queue_files(
+            itertools.chain((task.name,), expand_targets(task, reason)),
+            ):
+        case Exception() as err:
+            return err
+        case _:
+            return try_function(lambda: shutil.move(
+                to_state_file(task, suffix='.new'),
+                to_state_file(task),
+                ))
 
 
 def try_function(f: Callable[[], Any]) -> Optional[Exception]:
