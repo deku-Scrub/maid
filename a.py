@@ -1,42 +1,81 @@
-import itertools
-import enum
+import os
+import io
 import sys
+import enum
+import shutil
+import pathlib
+import hashlib
+import functools
+import itertools
+import dataclasses
+from dataclasses import dataclass, field
+from typing import Optional, Iterable, Sequence, Callable, Any, Final
 
-import maid.cache
+import maid.maids
+import maid.compose
+import maid.tasks
+import maid.decorators
 
 
-@maid.task(
+@maid.decorators.task(
+        't1',
+        )
+def g(task: maid.tasks.Task) -> maid.compose.Recipe:
+    return maid.compose.Recipe(
+            script_stream=sys.stdout,
+            output_stream=sys.stdout,
+            ) \
+                    | 'ls .' \
+                    | (filter, lambda x: '.py' in x) \
+                    | str.upper \
+                    > 't1.txt'
+
+
+#t = g
+#print(t.recipe(t).run())
+#print((maid.compose.Recipe(inputs=range(10)) | (sum,)).run())
+print(maid.maids.get_maid().dry_run('t1'))
+print(maid.maids.get_maid().run('t1'))
+
+
+
+@maid.decorators.task(
     'p1',
-    inputs=['lol\n', '.lol\n'],
     required_files=['requirements.txt'],
     targets=['a.txt', 'b.txt'],
-    cache=maid.cache.CacheType.HASH,
-    script_stream=sys.stdout,
-    independent_targets=True,
+    cache_type=maid.tasks.CacheType.HASH,
+    grouped=False,
 )
-def h(a):
-    a \
-    | "sed 's/lol/md/'" \
-    | "grep .md" \
-    | (lambda x: x.strip()+'?') \
-    | (lambda x: x.strip()+'m') \
-    | "tr 'm' '!'" \
-    > a.targets[0]
+def h(task: maid.tasks.Task) -> maid.compose.Recipe:
+    return maid.compose.Recipe(
+            inputs=['lol\n', '.lol\n'],
+            script_stream=sys.stdout,
+            ) \
+                    | "sed 's/lol/md/'" \
+                    | "grep .md" \
+                    | (lambda x: x.strip()+'?') \
+                    | (lambda x: x.strip()+'m') \
+                    | "tr 'm' '!'" \
+                    > task.targets[0]
 
-@maid.task(
+
+@maid.decorators.task(
     'p2',
     required_tasks=[h],
-    output_stream=sys.stdout,
-    script_stream=sys.stderr,
     is_default=True,
 )
-def h2(a):
-    a | f"cat {a.required_tasks['p1'].targets[0]}"
+def h2(task: maid.tasks.Task) -> maid.compose.Recipe:
+    return maid.compose.Recipe(
+            script_stream=sys.stdout,
+            output_stream=sys.stdout,
+            ) \
+                    | f"cat {task.required_tasks[0].targets[0]}"
 
-print(maid.get_maid().dry_run(verbose=True), file=sys.stderr)
-sys.stdout.writelines(maid.get_maid().run())
 
-a = maid.Task(inputs=(j for j in range(100))) \
+print(maid.maids.get_maid().dry_run(), file=sys.stderr)
+maid.maids.get_maid().run()
+
+a = maid.compose.Recipe(inputs=(j for j in range(100))) \
     | (filter, lambda x: x % 3 == 0) \
     | 'parallel {args} "echo paraLOL; echo {{}}"'.format(args='--bar') \
     | 'grep -i lol' \
@@ -47,7 +86,7 @@ a = maid.Task(inputs=(j for j in range(100))) \
 # ```
 #  | (lambda x: joblib.Parallel()(joblib.delayed(f)(xj) for xj in x),)
 # ```
-print(a.dry_run(True))
+print(a)
 print('task output: {}'.format(list(a.run())))
 
 # example from https://github.com/pytoolz/toolz
@@ -55,8 +94,8 @@ import collections
 import itertools
 stem = lambda x: [w.lower().rstrip(",.!:;'-\"").lstrip("'\"") for w in x]
 flatten = lambda x: (col for row in x for col in row)
-counter = collections.Counter()
-a = maid.Task(inputs=['this cat jumped over this other cat!']) \
+counter: collections.Counter[str] = collections.Counter()
+a = maid.compose.Recipe(inputs=['this cat jumped over this other cat!']) \
     | str.split \
     | stem \
     | counter.update
