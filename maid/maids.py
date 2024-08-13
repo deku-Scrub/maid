@@ -24,9 +24,9 @@ class _Maid:
                         maid.tasks.RunPhase.FINALLY: dict(),
                         }
 
-    def dry_run(self, task_name: str = '', verbose: bool = False) -> str:
+    def dry_run(self, task_name: str = '', *, verbose: bool = False) -> str:
         match '\n'.join(
-                t.dry_run() for t in itertools.chain(
+                t.dry_run(verbose) for t in itertools.chain(
                     self._task_graph[maid.tasks.RunPhase.START].values(),
                     (self._get_task(task_name),),
                     self._task_graph[maid.tasks.RunPhase.END].values(),

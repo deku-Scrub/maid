@@ -34,7 +34,7 @@ def g(task: maid.tasks.Task) -> maid.compose.Recipe:
 #t = g
 #print(t.recipe(t).run())
 #print((maid.compose.Recipe(inputs=range(10)) | (sum,)).run())
-print(maid.maids.get_maid().dry_run('t1'))
+print(maid.maids.get_maid().dry_run('t1', verbose=True))
 print(maid.maids.get_maid().run('t1'))
 
 
@@ -72,7 +72,7 @@ def h2(task: maid.tasks.Task) -> maid.compose.Recipe:
                     | f"cat {task.required_tasks[0].targets[0]}"
 
 
-print(maid.maids.get_maid().dry_run(), file=sys.stderr)
+print(maid.maids.get_maid().dry_run(verbose=True), file=sys.stderr)
 maid.maids.get_maid().run()
 
 a = maid.compose.Recipe(inputs=(j for j in range(100))) \

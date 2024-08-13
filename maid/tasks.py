@@ -10,7 +10,7 @@ import functools
 import itertools
 import dataclasses
 from dataclasses import dataclass, field
-from typing import Optional, Iterable, Sequence, Callable, Any, Final, assert_never
+from typing import Never, Optional, Iterable, Sequence, Callable, Any, Final, assert_never
 
 import maid.compose
 
@@ -93,8 +93,8 @@ class Task:
             traceback.print_exception(err)
             raise err
 
-    def dry_run(self) -> str:
-        return dry_run(self, set())
+    def dry_run(self, verbose: bool = True) -> str:
+        return dry_run(self, set(), verbose=verbose)[1]
 
     def __str__(self) -> str:
         return str(self.recipe(self))
@@ -112,36 +112,79 @@ def unvisited_tasks(task: Task, visited: set[str]) -> Iterable[Task]:
 
 
 def _format_dry_run(
-        prev_runs: Iterable[str],
+        prev_runs: Iterable[tuple[int, str]],
         task: Task,
         reason_to_run: str,
-        ) -> str:
-    return '{previous_runs}\n{this_run}'.format(
-            previous_runs='\n'.join(prev_runs),
-            this_run=(
-                '########################################################\n'
-                '# Task `{}` will run ({})\n'
-                '########################################################\n'
-                '{}\n'
-                ).format(task.name, reason_to_run, str(task)),
-            )
+        *,
+        verbose: bool = True,
+        ) -> tuple[int, str]:
+    match (
+            sum((j for j, _ in prev_runs), 0) + 1,
+            '{prev}\n{{cur}}'.format(prev='\n'.join(s for _, s in prev_runs)),
+            verbose,
+            ):
+        case (step, template, False):
+            return (
+                    step,
+                    template.format(
+                        cur=f'{step}) {task.name} ({reason_to_run})',
+                        ),
+                    )
+        case (step, template, True):
+            return (
+                    step,
+                    template.format(
+                        cur=(
+                            '###############################################\n'
+                            '# Step {step}:\n'
+                            '#   Task `{task_name}` will run ({reason})\n'
+                            '###############################################\n'
+                            '{recipe}\n'
+                            ).format(
+                                step=step,
+                                task_name=task.name,
+                                reason=reason_to_run,
+                                recipe=str(task),
+                                ),
+                            ),
+                    )
+    raise RuntimeError('Unreachable code was reached!')
 
 
-def dry_run(task: Task, visited: set[str]) -> str:
+def dry_run(
+        task: Task,
+        visited: set[str],
+        *,
+        verbose: bool = True,
+        ) -> tuple[int, str]:
     visited.add(task.name)
-    prev_runs = (dry_run(t, visited) for t in unvisited_tasks(task, visited))
+    prev_runs = [
+            dry_run(t, visited, verbose=verbose)
+            for t in unvisited_tasks(task, visited)
+            ]
 
     match should_run(task):
         case RunReason.MISSING_TARGETS:
-            return _format_dry_run(prev_runs, task, 'targets are missing')
+            return _format_dry_run(
+                    prev_runs,
+                    task,
+                    'targets are missing',
+                    verbose=verbose,
+                    )
         case RunReason.MODIFIED_INPUTS:
             return _format_dry_run(
                     prev_runs,
                     task,
                     'required files/tasks are modified',
+                    verbose=verbose,
                     )
         case RunReason.NO_CACHE:
-            return _format_dry_run(prev_runs, task, 'uses no cache')
+            return _format_dry_run(
+                    prev_runs,
+                    task,
+                    'uses no cache',
+                    verbose=verbose,
+                    )
         case RunReason.DONT_RUN:
             pass
         case _ as unreachable:
@@ -151,9 +194,10 @@ def dry_run(task: Task, visited: set[str]) -> str:
         return _format_dry_run(
                 prev_runs,
                 task,
-                'previous run did not finish'
+                'previous run did not finish',
+                verbose=verbose,
                 )
-    return ''
+    return 0, ''
 
 
 def run(task: Task, visited: set[str]) -> Optional[Exception]:
