@@ -10,9 +10,10 @@ import functools
 import itertools
 import dataclasses
 from dataclasses import dataclass, field
-from typing import Never, Optional, Iterable, Sequence, Callable, Any, Final, assert_never
+from typing import Optional, Iterable, Sequence, Callable, Any, Final, assert_never
 
 import maid.compose
+import maid.utils.setops
 
 
 class CacheType(enum.Enum):
@@ -78,6 +79,22 @@ class Task:
                 to_state_file(self, suffix='.new'),
                 self.cache_type,
                 )
+
+    def get_modified_files(self) -> Iterable[str]:
+        if not self.name:
+            return tuple()
+        if not os.path.exists(old_state := to_state_file(self)):
+            return tuple()
+        if not os.path.exists(new_state := to_state_file(self, suffix='.new')):
+            return tuple()
+        with (
+                open(old_state) as old_fis,
+                open(new_state) as new_fis,
+                ):
+            return (
+                    x[(x.find(' ') + 1):]
+                    for x in maid.utils.setops.difference(new_fis, old_fis)
+                    )
 
     def run_recipe(self, target: str = '') -> Iterable[Any]:
         if target:
