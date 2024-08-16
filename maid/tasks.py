@@ -10,7 +10,7 @@ import functools
 import itertools
 import dataclasses
 from dataclasses import dataclass, field
-from typing import Optional, Iterable, Sequence, Callable, Any, Final, assert_never
+from typing import IO, Optional, Iterable, Sequence, Callable, Any, Final, assert_never
 
 import maid.compose
 import maid.utils.setops
@@ -51,6 +51,7 @@ class Task:
     run_phase: RunPhase = RunPhase.NORMAL
     is_default: bool = False
     hash_dirname: str = field(default='.maid', init=False)
+    parent: Optional['Task'] = None
 
     def __post_init__(self) -> None:
         match next(
@@ -81,20 +82,12 @@ class Task:
                 )
 
     def get_modified_files(self) -> Iterable[str]:
-        if not self.name:
+        if self.parent:
+            return self.parent.get_modified_files()
+        if not os.path.exists(diff := to_state_file(self, suffix='.diff')):
             return tuple()
-        if not os.path.exists(old_state := to_state_file(self)):
-            return tuple()
-        if not os.path.exists(new_state := to_state_file(self, suffix='.new')):
-            return tuple()
-        with (
-                open(old_state) as old_fis,
-                open(new_state) as new_fis,
-                ):
-            return (
-                    x[(x.find(' ') + 1):]
-                    for x in maid.utils.setops.difference(new_fis, old_fis)
-                    )
+        with open(diff) as fis:
+            return fis.readlines()
 
     def run_recipe(self, target: str = '') -> Iterable[Any]:
         if target:
@@ -102,6 +95,7 @@ class Task:
                     self,
                     name='',
                     targets=(target,),
+                    parent=self,
                     ).run_recipe()
         return self.recipe(self).run()
 
@@ -264,6 +258,31 @@ def expand_targets(task: Task, reason: RunReason) -> Iterable[str]:
     return expand_globs(task.targets)
 
 
+def open_state(task: Task, suffix: str = '', mode: str = 'rt') -> IO[str]:
+    match mode, to_state_file(task, suffix=suffix):
+        case ('rt', str(f)):
+            if os.path.exists(f):
+                return open(f, mode=mode)
+        case ('wt', str(f)):
+            return open(f, mode=mode)
+    return io.StringIO()
+
+
+def diff_states(task: Task) -> Optional[Exception]:
+    if not task.name:
+        return Exception('Cannot diff anonymous tasks.')
+    with (
+            open_state(task) as old_fis,
+            open_state(task, suffix='.new') as new_fis,
+            open_state(task, suffix='.diff', mode='wt') as diff_fos,
+            ):
+        return try_function(
+                lambda: diff_fos.writelines((
+                    x[(x.find(' ') + 1):]
+                    for x in maid.utils.setops.difference(new_fis, old_fis)
+                    )))
+
+
 def setup_file_states(task: Task, reason: RunReason) -> Optional[Exception]:
     match queue_files(
             itertools.chain((task.name,), expand_targets(task, reason)),
@@ -271,9 +290,12 @@ def setup_file_states(task: Task, reason: RunReason) -> Optional[Exception]:
         case Exception() as err:
             return err
         case _:
-            return try_function(lambda: shutil.move(
-                to_state_file(task, suffix='.new'),
-                to_state_file(task),
+            return find_error((
+                diff_states(task),
+                try_function(lambda: shutil.copy(
+                    to_state_file(task, suffix='.new'),
+                    to_state_file(task),
+                    ))
                 ))
 
 
@@ -330,13 +352,6 @@ def hash_file(filename: str, cache_type: CacheType) -> str:
     return ''
 
 
-def hash_files(
-        filenames: Iterable[str],
-        cache_type: CacheType,
-        ) -> Iterable[str]:
-    yield from (hash_file(f, cache_type) for f in filenames)
-
-
 def cache_files(
         filenames: Iterable[str],
         outfile: str,
@@ -345,21 +360,26 @@ def cache_files(
     if not outfile:
         return ''
     with open(outfile, mode='wt', encoding='utf-8') as fos:
+        # Sorting could be costly.
         fos.writelines(
-                (f'{h}\n' for h in hash_files(sorted(filenames), cache_type)),
+                sorted(
+                    '{h} {f}\n'.format(h=hash_file(f, cache_type), f=f)
+                    for f in filenames
+                    )
                 )
-    return next(iter(hash_files((outfile,), cache_type)))
+    return hash_file(outfile, cache_type)
 
 
 def start_execution(task: Task) -> Optional[Exception]:
     if task.grouped:
-        return execute(task)
+        return cleanup_states((execute(task),), task)
     return cleanup_states(
             (
                 execute(task, target)
                 for target in expand_globs(task.targets)
                 if is_queued(target)
                 ),
+            task,
             task.name,
             )
 
@@ -404,6 +424,7 @@ def remove_files(filenames: Iterable[str]) -> Optional[Exception]:
     return find_error(
             os.remove(f) if os.path.isfile(f) else shutil.rmtree(f)
             for f in filenames
+            if f and (os.path.isfile(f) or os.path.isdir(f))
             )
 
 
@@ -439,9 +460,18 @@ def cleanup_state(
 
 def cleanup_states(
         errors: Iterable[Optional[Exception]],
-        filename: str,
+        task: Task,
+        filename: str = '',
         ) -> Optional[Exception]:
-    return err if (err := find_error(errors)) else dequeue_files((filename,))
+    return find_error((
+        x
+        for e in (
+            (find_error(errors),),
+            (dequeue_files((filename,)),) if filename else tuple(),
+            (remove_files((to_state_file(task, suffix='.diff'),)),),
+            )
+        for x in e
+        ))
 
 
 class MissingRequiredFileException(Exception):
