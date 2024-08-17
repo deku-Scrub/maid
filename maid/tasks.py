@@ -159,14 +159,16 @@ def _format_dry_run(
         ) -> tuple[int, str]:
     match (
             sum((j for j, _ in prev_runs), 0) + 1,
-            '{prev}\n{{cur}}'.format(prev='\n'.join(s for _, s in prev_runs)),
+            '{prev}{{cur}}'.format(prev='\n'.join(s for _, s in prev_runs)),
             verbose,
             ):
+        case (step, template, _) if not reason_to_run:
+            return (step, template.format(cur=''))
         case (step, template, False):
             return (
                     step,
                     template.format(
-                        cur=f'{step}) {task.name} ({reason_to_run})',
+                        cur=f'\n{step}) {task.name} ({reason_to_run})',
                         ),
                     )
         case (step, template, True):
@@ -174,6 +176,7 @@ def _format_dry_run(
                     step,
                     template.format(
                         cur=(
+                            '\n'
                             '###############################################\n'
                             '# Step {step}:\n'
                             '#   Task `{task_name}` will run ({reason})\n'
@@ -225,7 +228,7 @@ def dry_run(
                     verbose=verbose,
                     )
         case RunReason.DONT_RUN:
-            pass
+            return _format_dry_run(prev_runs, task, '', verbose=verbose)
         case _ as unreachable:
             assert_never(unreachable)
 
