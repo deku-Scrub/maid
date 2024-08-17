@@ -280,6 +280,17 @@ def start_run(task: Task, reason: RunReason) -> Optional[Exception]:
     return start_execution(task)
 
 
+def expand_all_targets(task: Task) -> Iterable[str]:
+    return (
+            f
+            for x in (
+                (t[0] for t in get_tt(task)),
+                expand_globs(task.targets),
+                )
+            for f in x
+            )
+
+
 def expand_targets(task: Task, reason: RunReason) -> Iterable[str]:
     if task.grouped:
         return tuple()
@@ -513,6 +524,8 @@ def remove_files(filenames: Iterable[str]) -> Optional[Exception]:
 
 
 def handle_error(error: Optional[Exception], task: Task) -> Optional[Exception]:
+    if (f := next((f for f in expand_all_targets(task) if not os.path.exists(f)), '')):
+        return MissingTargetException(f)
     if not error:
         return None
     if task.remove_targets_on_failure:
@@ -569,4 +582,15 @@ class MissingRequiredFileException(Exception):
                 task_name,
                 filename,
                 )
+        super().__init__(msg)
+
+
+class MissingTargetException(Exception):
+    '''
+    '''
+
+    def __init__(self, filename: str):
+        '''
+        '''
+        msg = 'Target `{}` was not created.'.format(filename)
         super().__init__(msg)
