@@ -416,9 +416,20 @@ def cache_files(
 
 
 def is_diff_t(task: Task) -> Iterable[str]:
-    with open_state(task, suffix='.diff') as diff_fis:
+    if not os.path.exists(diff_file := to_state_file(task, suffix='.diff')):
+        raise RuntimeError('Precondtion not met for `is_diff_t`.')
+    yield from (t[0] for t in get_tt(task) if add_tied_if_missing(t))
+    with open(diff_file) as diff_fis:
         diff_mmap = mmap.mmap(diff_fis.fileno(), 0, access=mmap.ACCESS_READ)
         yield from (t[0] for t in get_tt(task) if diff_t(t, diff_mmap))
+
+
+def add_tied_if_missing(tt: Sequence[str]) -> bool:
+    if os.path.exists(tt[0]):
+        return False
+    with open(to_state_file(tt[0]), mode='wt') as fos:
+        fos.writelines('\n{required}'.format(required='\t'.join(tt[1:])))
+    return True
 
 
 def diff_t(tt: Sequence[str], diff_mmap: mmap.mmap) -> bool:
