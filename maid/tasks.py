@@ -1,4 +1,6 @@
+import re
 import traceback
+import mmap
 import base64
 import os
 import io
@@ -52,6 +54,7 @@ class Task:
     is_default: bool = False
     hash_dirname: str = field(default='.maid', init=False)
     parent: Optional['Task'] = None
+    tt: Optional[tuple[str, str, str, str, Sequence[str], str]] = None
 
     def __post_init__(self) -> None:
         match next(
@@ -82,6 +85,8 @@ class Task:
                 )
 
     def get_modified_files(self) -> Iterable[str]:
+        if self.parent and self.parent.tt:
+            return pathlib.Path(to_state_file(self.targets[0])).read_text().split('\n')[0].split('\t')
         if self.parent:
             return self.parent.get_modified_files()
         if not os.path.exists(diff := to_state_file(self, suffix='.diff')):
@@ -90,6 +95,14 @@ class Task:
             return fis.readlines()
 
     def run_recipe(self, target: str = '') -> Iterable[Any]:
+        if target and self.tt and (os.path.getsize(to_state_file(target)) > 0):
+            return dataclasses.replace(
+                    self,
+                    name='',
+                    targets=(target,),
+                    parent=self,
+                    required_files=pathlib.Path(to_state_file(target)).read_text().split('\n')[1].split('\t'),
+                    ).run_recipe()
         if target:
             return dataclasses.replace(
                     self,
@@ -111,10 +124,24 @@ class Task:
         return str(self.recipe(self))
 
 
+def get_tt(task: Task) -> Iterable[tuple[str, ...]]:
+    if not task.tt:
+        return tuple()
+    file_pattern = re.compile(task.tt[1])
+    sub_pattern = re.compile(task.tt[2])
+    return (
+            tuple(sub_pattern.sub(r, f) for l in ((task.tt[5],), task.tt[4]) for r in l)
+            for p in pathlib.Path('').glob(task.tt[0])
+            if (f := str(p)) and file_pattern.search(f)
+            )
+
+
 def expand_requirements(task: Task) -> Iterable[str]:
     return itertools.chain(
             expand_globs(task.required_files),
             (f for t in task.required_tasks for f in expand_globs(t.targets)),
+            (f[0] for t in task.required_tasks for f in get_tt(t)),
+            (f for t in get_tt(task) for f in t[1:]),
             )
 
 
@@ -239,6 +266,8 @@ def should_run(task: Task) -> RunReason:
         return RunReason.MODIFIED_INPUTS
     if any(not os.path.exists(f) for f in expand_globs(task.targets)):
         return RunReason.MISSING_TARGETS
+    if any(not os.path.exists(f[0]) for f in get_tt(task)):
+        return RunReason.MISSING_TARGETS
     if task.cache_type == CacheType.NONE:
         return RunReason.NO_CACHE
     return RunReason.DONT_RUN
@@ -254,8 +283,23 @@ def expand_targets(task: Task, reason: RunReason) -> Iterable[str]:
     if task.grouped:
         return tuple()
     if reason == RunReason.MISSING_TARGETS:
-        return (f for f in expand_globs(task.targets) if not os.path.exists(f))
-    return expand_globs(task.targets)
+        return (
+                f
+                for x in (
+                    (t[0] for t in get_tt(task)),
+                    expand_globs(task.targets),
+                    )
+                for f in x
+                if not os.path.exists(f)
+                )
+    return (
+            f
+            for x in (
+                (t[0] for t in get_tt(task)),
+                expand_globs(task.targets),
+                )
+            for f in x
+            )
 
 
 def open_state(task: Task, suffix: str = '', mode: str = 'rt') -> IO[str]:
@@ -370,13 +414,41 @@ def cache_files(
     return hash_file(outfile, cache_type)
 
 
+def is_diff_t(task: Task) -> Iterable[str]:
+    with open_state(task, suffix='.diff') as diff_fis:
+        diff_mmap = mmap.mmap(diff_fis.fileno(), 0, access=mmap.ACCESS_READ)
+        yield from (t[0] for t in get_tt(task) if diff_t(t, diff_mmap))
+
+
+def diff_t(tt: Sequence[str], diff_mmap: mmap.mmap) -> bool:
+    match '\t'.join(
+            r
+            for r in tt[1:]
+            if maid.utils.setops.is_in(r.encode('utf-8'), diff_mmap)
+            ):
+        case '':
+            os.remove(to_state_file(tt[0]))
+            return False
+        case modified:
+            with open(to_state_file(tt[0]), mode='wt') as fos:
+                fos.writelines('{modified}\n{required}'.format(
+                    modified=modified,
+                    required='\t'.join(tt[1:]),
+                    ))
+            return True
+
+
 def start_execution(task: Task) -> Optional[Exception]:
     if task.grouped:
         return cleanup_states((execute(task),), task)
     return cleanup_states(
             (
                 execute(task, target)
-                for target in expand_globs(task.targets)
+                for x in (
+                    is_diff_t(task),
+                    expand_globs(task.targets),
+                    )
+                for target in x
                 if is_queued(target)
                 ),
             task,
