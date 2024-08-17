@@ -80,7 +80,6 @@ def h2(task: maid.tasks.Task) -> maid.compose.Recipe:
     required_tasks=[h2],
     cache_type=maid.tasks.CacheType.HASH,
     tt=('maid/**/*.py', '[^_]+.py', '(.+/)([^/]+)$', '', (r'\1\2',), r'logs/\2'),
-    is_default=True,
 )
 def h3(task: maid.tasks.Task) -> maid.compose.Recipe:
     print(f'rf h3: {task.required_files}')
@@ -89,10 +88,28 @@ def h3(task: maid.tasks.Task) -> maid.compose.Recipe:
     return maid.compose.Recipe(
             script_stream=sys.stdout,
             output_stream=sys.stdout,
+            ) \
+                    | 'mkdir -p logs' \
+                    | f'touch {task.targets[0]}'
+
+
+@maid.decorators.task(
+    'p4',
+    required_tasks=[h3],
+    cache_type=maid.tasks.CacheType.HASH,
+    is_default=True,
+)
+def h4(task: maid.tasks.Task) -> maid.compose.Recipe:
+    print(f'h4')
+    return maid.compose.Recipe(
+            script_stream=sys.stdout,
+            output_stream=sys.stdout,
             )
 
 
-print(maid.maids.get_maid().dry_run(verbose=True), file=sys.stderr)
+
+
+print(maid.maids.get_maid().dry_run(verbose=False), file=sys.stderr)
 maid.maids.get_maid().run()
 
 a = maid.compose.Recipe(inputs=(j for j in range(100))) \
