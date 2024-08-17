@@ -57,6 +57,7 @@ class Task:
     tt: Optional[tuple[str, str, str, str, Sequence[str], str]] = None
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, 'grouped', False if self.tt else self.grouped)
         match next(
                 (
                     f
