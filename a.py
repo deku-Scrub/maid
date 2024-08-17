@@ -47,6 +47,7 @@ print(maid.maids.get_maid().run('t1'))
     grouped=False,
 )
 def h(task: maid.tasks.Task) -> maid.compose.Recipe:
+    print('from task p1', list(task.get_modified_files()))
     return maid.compose.Recipe(
             inputs=['lol\n', '.lol\n'],
             script_stream=sys.stdout,
@@ -54,22 +55,41 @@ def h(task: maid.tasks.Task) -> maid.compose.Recipe:
                     | "sed 's/lol/md/'" \
                     | "grep .md" \
                     | (lambda x: x.strip()+'?') \
-                    | (lambda x: x.strip()+'m') \
+                    | (lambda x: str(list(task.get_modified_files())) + x.strip()+'m') \
                     | "tr 'm' '!'" \
                     > task.targets[0]
 
 
 @maid.decorators.task(
     'p2',
+    required_files=['requirements.txt'],
     required_tasks=[h],
-    is_default=True,
+    cache_type=maid.tasks.CacheType.HASH,
 )
 def h2(task: maid.tasks.Task) -> maid.compose.Recipe:
     return maid.compose.Recipe(
             script_stream=sys.stdout,
             output_stream=sys.stdout,
             ) \
+                    | f"echo looool {list(task.get_modified_files())}" \
                     | f"cat {task.required_tasks[0].targets[0]}"
+
+
+@maid.decorators.task(
+    'p3',
+    required_tasks=[h2],
+    cache_type=maid.tasks.CacheType.HASH,
+    tt=('maid/**/*.py', '[^_]+.py', '(.+/)([^/]+)$', '', (r'\1\2',), r'logs/\2'),
+    is_default=True,
+)
+def h3(task: maid.tasks.Task) -> maid.compose.Recipe:
+    print(f'rf h3: {task.required_files}')
+    print(f't h3: {task.targets}')
+    print(f'mf h3: {task.get_modified_files()}')
+    return maid.compose.Recipe(
+            script_stream=sys.stdout,
+            output_stream=sys.stdout,
+            )
 
 
 print(maid.maids.get_maid().dry_run(verbose=True), file=sys.stderr)
