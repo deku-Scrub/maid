@@ -1,3 +1,5 @@
+import mmap
+
 from typing import Protocol, Iterable, Callable, Optional, Any
 
 
@@ -69,11 +71,11 @@ def _setop_template[T: Comparable](
                     bj = next(iter(b), None)
 
 
-def _find_midpoint(x: Iterable[bytes], a: int, b: int) -> tuple[int, bytes]:
+def _find_midpoint(x: mmap.mmap, a: int, b: int) -> tuple[int, bytes]:
     if (b - a) < 1:
         return -1, b''
     if (b - a) == 1:
-        return -1, x[a]
+        return -1, x[a : (a + 1)]
     match (
             (m := (a + b)//2),
             (ma := x.rfind(b'\n', a, m)),
@@ -87,9 +89,12 @@ def _find_midpoint(x: Iterable[bytes], a: int, b: int) -> tuple[int, bytes]:
             return -1, x[a : mb]
         case (_, ma, mb): # Midpoint is on an intermediate string.
             return ma, x[(ma + 1) : mb]
+    raise RuntimeError('Unreachable code has been reached!')
 
 
-def is_in(e: bytes, x: Iterable[bytes], a: int, b: int) -> bool:
+def is_in(e: bytes, x: mmap.mmap) -> bool:
+    a = 0
+    b = len(x)
     m, s = _find_midpoint(x, a, b)
     while True:
         print(s)
@@ -111,10 +116,10 @@ def is_in(e: bytes, x: Iterable[bytes], a: int, b: int) -> bool:
     #print(j)
 #exit()
 
-import pathlib
-import mmap
-with open('/tmp/a.txt', mode='wt') as fos:
-    fos.writelines(sorted(f'{j}\n' for j in range(1000)))
-with open('/tmp/a.txt') as fis:
-    m = mmap.mmap(fis.fileno(), 0, access=mmap.ACCESS_READ)
-    print(is_in(b'909', m, 0, len(m)))
+#import pathlib
+#import mmap
+#with open('/tmp/a.txt', mode='wt') as fos:
+#    fos.writelines(sorted(f'{j}\n' for j in range(1000)))
+#with open('/tmp/a.txt') as fis:
+#    m = mmap.mmap(fis.fileno(), 0, access=mmap.ACCESS_READ)
+#    print(is_in(b'909', m))
