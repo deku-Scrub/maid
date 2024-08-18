@@ -438,7 +438,6 @@ def is_diff_t(task: Task) -> Iterable[str]:
     yield from (t[0] for t in get_tt(task) if add_tied_if_missing(t))
     with open(diff_file) as diff_fis:
         diff_mmap = mmap.mmap(diff_fis.fileno(), 0, access=mmap.ACCESS_READ)
-        #print(diff_mmap[:])
         yield from (t[0] for t in get_tt(task) if diff_t(t, diff_mmap))
 
 
@@ -488,7 +487,7 @@ def start_execution(task: Task, parallel: bool = False) -> Optional[Exception]:
                 task.name,
                 )
     return cleanup_states(
-            (execute(task, t) for t in is_diff_t(task)),
+            (execute(task, t) for t in _get_targets_to_execute(task)),
             task,
             task.name,
             )
