@@ -1,3 +1,5 @@
+import concurrent.futures
+import multiprocessing
 import re
 import traceback
 import mmap
@@ -335,8 +337,9 @@ def diff_states(task: Task) -> Optional[Exception]:
             open_state(task, suffix='.new') as new_fis,
             open_state(task, suffix='.diff', mode='wt') as diff_fos,
             ):
+        # Sorting could be costly.
         return try_function(
-                lambda: diff_fos.writelines((
+                lambda: diff_fos.writelines(sorted(
                     x[(x.find(' ') + 1):]
                     for x in maid.utils.setops.difference(new_fis, old_fis)
                     )))
@@ -431,10 +434,11 @@ def cache_files(
 
 def is_diff_t(task: Task) -> Iterable[str]:
     if not os.path.exists(diff_file := to_state_file(task, suffix='.diff')):
-        raise RuntimeError('Precondtion not met for `is_diff_t`.')
+        raise RuntimeError('Precondition not met for `is_diff_t`.')
     yield from (t[0] for t in get_tt(task) if add_tied_if_missing(t))
     with open(diff_file) as diff_fis:
         diff_mmap = mmap.mmap(diff_fis.fileno(), 0, access=mmap.ACCESS_READ)
+        #print(diff_mmap[:])
         yield from (t[0] for t in get_tt(task) if diff_t(t, diff_mmap))
 
 
@@ -464,23 +468,41 @@ def diff_t(tt: Sequence[str], diff_mmap: mmap.mmap) -> bool:
             return True
 
 
-def start_execution(task: Task) -> Optional[Exception]:
+def _pexec(args: tuple[Task, str]) -> Optional[Exception]:
+    task, target = args[0], args[1]
+    return execute(task, target)
+
+
+executor = concurrent.futures.ProcessPoolExecutor(max_workers=2)
+#executor = multiprocessing.Pool(processes=2)
+def start_execution(task: Task, parallel: bool = False) -> Optional[Exception]:
     if task.grouped:
         return cleanup_states((execute(task),), task)
+    if parallel:
+        return cleanup_states(
+                executor.map(
+                    _pexec,
+                    [(task, t) for t in _get_targets_to_execute(task)]
+                    ),
+                task,
+                task.name,
+                )
     return cleanup_states(
-            (
-                execute(task, target)
-                for x in (
-                    is_diff_t(task),
-                    expand_globs(task.targets),
-                    )
-                for target in x
-                if is_queued(target)
-                ),
+            (execute(task, t) for t in is_diff_t(task)),
             task,
             task.name,
             )
 
+def _get_targets_to_execute(task: Task) -> Iterable[str]:
+    return (
+            target
+            for x in (
+                is_diff_t(task),
+                expand_globs(task.targets),
+                )
+            for target in x
+            if is_queued(target)
+            )
 
 def execute(task: Task, target: str = '') -> Optional[Exception]:
     return cleanup_state(

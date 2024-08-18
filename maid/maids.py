@@ -28,7 +28,7 @@ class _Maid:
         match '\n'.join(
                 t.dry_run(verbose) for t in itertools.chain(
                     self._task_graph[maid.tasks.RunPhase.START].values(),
-                    (self._get_task(task_name),),
+                    (self.get_task(task_name),),
                     self._task_graph[maid.tasks.RunPhase.END].values(),
                     self._task_graph[maid.tasks.RunPhase.FINALLY].values(),
                     )
@@ -56,7 +56,7 @@ class _Maid:
             return self._try_run(
                     itertools.chain(
                         self._task_graph[maid.tasks.RunPhase.START].values(),
-                        (self._get_task(task_name),),
+                        (self.get_task(task_name),),
                         self._task_graph[maid.tasks.RunPhase.END].values(),
                         )
                     )
@@ -66,7 +66,7 @@ class _Maid:
             if (e := self._try_run(self._task_graph[maid.tasks.RunPhase.FINALLY].values())):
                 raise e
 
-    def _get_task(self, task_name: str) -> maid.tasks.Task:
+    def get_task(self, task_name: str) -> maid.tasks.Task:
         if task_name in self._task_graph[maid.tasks.RunPhase.NORMAL]:
             return self._task_graph[maid.tasks.RunPhase.NORMAL][task_name]
         if task_name:

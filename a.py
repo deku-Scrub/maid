@@ -63,7 +63,7 @@ def h(task: maid.tasks.Task) -> maid.compose.Recipe:
 @maid.decorators.task(
     'p2',
     required_files=['requirements.txt'],
-    required_tasks=[h],
+    required_tasks=['p1'],
     cache_type=maid.tasks.CacheType.HASH,
 )
 def h2(task: maid.tasks.Task) -> maid.compose.Recipe:
@@ -77,7 +77,7 @@ def h2(task: maid.tasks.Task) -> maid.compose.Recipe:
 
 @maid.decorators.task(
     'p3',
-    required_tasks=[h2],
+    required_tasks=['p2'],
     cache_type=maid.tasks.CacheType.HASH,
     tt=('maid/**/*.py', '[^_]+.py', '(.+/)([^/]+)$', '', (r'\1\2',), r'logs/\2'),
 )
@@ -95,7 +95,7 @@ def h3(task: maid.tasks.Task) -> maid.compose.Recipe:
 
 @maid.decorators.task(
     'p4',
-    required_tasks=[h3],
+    required_tasks=['p3'],
     cache_type=maid.tasks.CacheType.HASH,
     is_default=True,
 )
