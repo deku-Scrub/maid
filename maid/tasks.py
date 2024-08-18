@@ -481,7 +481,7 @@ def start_execution(task: Task, parallel: bool = False) -> Optional[Exception]:
         return cleanup_states(
                 executor.map(
                     _pexec,
-                    [(task, t) for t in _get_targets_to_execute(task)]
+                    ((task, t) for t in _get_targets_to_execute(task))
                     ),
                 task,
                 task.name,
