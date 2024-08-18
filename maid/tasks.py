@@ -492,6 +492,7 @@ def start_execution(task: Task, parallel: bool = False) -> Optional[Exception]:
             task.name,
             )
 
+
 def _get_targets_to_execute(task: Task) -> Iterable[str]:
     return (
             target
@@ -508,6 +509,7 @@ def execute(task: Task, target: str = '') -> Optional[Exception]:
             handle_error(
                 try_function(lambda: task.run_recipe(target)),
                 task,
+                target,
                 ),
             target if target else task.name,
             )
@@ -547,8 +549,15 @@ def remove_files(filenames: Iterable[str]) -> Optional[Exception]:
             )
 
 
-def handle_error(error: Optional[Exception], task: Task) -> Optional[Exception]:
-    if (f := next((f for f in expand_all_targets(task) if not os.path.exists(f)), '')):
+def handle_error(
+        error: Optional[Exception],
+        task: Task,
+        target: str = '',
+        ) -> Optional[Exception]:
+    if target:
+        if not os.path.exists(target):
+            return MissingTargetException(target)
+    elif (f := next((f for f in expand_all_targets(task) if not os.path.exists(f)), '')):
         return MissingTargetException(f)
     if not error:
         return None
