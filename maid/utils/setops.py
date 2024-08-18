@@ -74,21 +74,21 @@ def _setop_template[T: Comparable](
 def _find_midpoint(x: mmap.mmap, a: int, b: int) -> tuple[int, bytes]:
     if (b - a) < 1:
         return -1, b''
-    if (b - a) == 1:
-        return -1, x[a : (a + 1)]
+    #if (b - a) == 1:
+        #return -1, x[a : (a + 1)]
     match (
-            (m := (a + b)//2),
-            (ma := x.rfind(b'\n', a, m)),
-            (mb := x.find(b'\n', ma + 1, b)),
+            m := (a + b)//2,
+            ma := max(x.rfind(b'\n', a, m) + 1, a),
+            mb := x.find(b'\n', ma, b),
             ):
         case (_, -1, -1): # Midpoint is on the only string.
-            return -1, x[a : b]
+            return a, x[a : b]
         case (_, ma, -1): # Midpoint is on the last string.
-            return -1, x[(ma + 1) : b]
+            return ma, x[ma : b]
         case (_, -1, mb): # Midpoint is on the first string.
-            return -1, x[a : mb]
+            return a, x[a : mb]
         case (_, ma, mb): # Midpoint is on an intermediate string.
-            return ma, x[(ma + 1) : mb]
+            return ma, x[ma : mb]
     raise RuntimeError('Unreachable code has been reached!')
 
 
@@ -97,7 +97,8 @@ def is_in(e: bytes, x: mmap.mmap) -> bool:
     b = len(x)
     m, s = _find_midpoint(x, a, b)
     while True:
-        print(s)
+        if a >= b:
+            return e == s
         if m < 0:
             return e == s
         elif e < s:
@@ -123,3 +124,5 @@ def is_in(e: bytes, x: mmap.mmap) -> bool:
 #with open('/tmp/a.txt') as fis:
 #    m = mmap.mmap(fis.fileno(), 0, access=mmap.ACCESS_READ)
 #    print(is_in(b'909', m))
+#m = b'maid/decorators.py\nmaid/tasks.py\n'
+#print(is_in(b'maid/tasks.py', m))
