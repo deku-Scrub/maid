@@ -344,15 +344,19 @@ def queue_targets(task: Task) -> Optional[Exception]:
     return queue_files((f for f in expand_globs(task.targets)), task)
 
 
-def add_tied_if_missing(tt: Sequence[str]) -> bool:
+def add_tied_if_missing(tt: Sequence[str], task: Task) -> bool:
     if os.path.exists(tt[0]):
         return False
-    with open(to_state_file(tt[0]), mode='wt') as fos:
+    if os.path.exists(state_file := to_state_file(tt[0])):
+        raise DuplicateFileException(tt[0], task)
+    with open(state_file, mode='wt') as fos:
         fos.writelines('\n{required}'.format(required='\t'.join(tt[1:])))
     return True
 
 
-def diff_tied_target(tt: Sequence[str], diff_mmap: mmap.mmap) -> bool:
+def diff_tied_target(tt: Sequence[str], diff_mmap: mmap.mmap, task: Task) -> bool:
+    if os.path.exists(state_file := to_state_file(tt[0])):
+        raise DuplicateFileException(tt[0], task)
     match '\t'.join(
             r
             for r in tt[1:]
@@ -361,7 +365,7 @@ def diff_tied_target(tt: Sequence[str], diff_mmap: mmap.mmap) -> bool:
         case '':
             return False
         case modified:
-            with open(to_state_file(tt[0]), mode='wt') as fos:
+            with open(state_file, mode='wt') as fos:
                 fos.writelines('{modified}\n{required}'.format(
                     modified=modified,
                     required='\t'.join(tt[1:]),
@@ -375,18 +379,20 @@ def queue_tied_targets(task: Task) -> Optional[Exception]:
     if not os.path.exists(diff_file := to_state_file(task, suffix='.diff')):
         raise RuntimeError('Precondition not met for `expand_tied_targets`.')
     if os.path.getsize(diff_file) < 1:
-        return find_error(
-                tt[0]
-                for tt in get_tied_targets(task)
-                if add_tied_if_missing(tt)
-                )
+        return try_function(
+                lambda: find_error(
+                    tt[0]
+                    for tt in get_tied_targets(task)
+                    if add_tied_if_missing(tt, task)
+                    ))
     with open(diff_file) as diff_fis:
         diff_mmap = mmap.mmap(diff_fis.fileno(), 0, access=mmap.ACCESS_READ)
-        return find_error(
-                tt[0]
-                for tt in get_tied_targets(task)
-                if add_tied_if_missing(tt) or diff_tied_target(tt, diff_mmap)
-                )
+        return try_function(
+                lambda: find_error(
+                    tt[0]
+                    for tt in get_tied_targets(task)
+                    if add_tied_if_missing(tt, task) or diff_tied_target(tt, diff_mmap, task)
+                    ))
 
 
 def open_state(task: Task, suffix: str = '', mode: str = 'rt') -> IO[str]:
