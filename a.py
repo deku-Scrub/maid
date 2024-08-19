@@ -79,7 +79,7 @@ def h2(task: maid.tasks.Task) -> maid.compose.Recipe:
     'p3',
     required_tasks=['p2'],
     cache_type=maid.tasks.CacheType.HASH,
-    tt=('maid/**/*.py', '[^_]+.py', '(.+/)([^/]+)$', '', (r'\1\2',), r'logs/\2'),
+    tied_targets=('maid/**/*.py', '[^_]+.py', '(.+/)([^/]+)$', '', (r'\1\2',), r'logs/\2'),
 )
 def h3(task: maid.tasks.Task) -> maid.compose.Recipe:
     print(f'rf h3: {task.required_files}')
