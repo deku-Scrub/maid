@@ -305,6 +305,7 @@ def should_run(task: Task) -> RunReason:
 
 def start_run(task: Task) -> Optional[Exception]:
     if (err := setup_file_states(task)):
+        remove_files(str(f) for f in pathlib.Path('.maid/targets').glob('*'))
         traceback.print_exception(err)
         return err
     return start_execution(task)
@@ -316,12 +317,23 @@ def dequeue_files(filenames: Iterable[str]) -> Optional[Exception]:
             )
 
 
-def queue_files(filenames: Iterable[str]) -> Optional[Exception]:
+def queue_files(
+        filenames: Iterable[str],
+        task: Optional[Task] = None,
+        ) -> Optional[Exception]:
     return try_function(
-            lambda: find_error(
-                pathlib.Path(to_state_file(f)).touch() for f in filenames
-                ),
+            lambda: find_error((_touch_file(f, task) for f in filenames))
             )
+
+
+def _touch_file(
+        filename: str,
+        task: Optional[Task] = None,
+        ) -> Optional[Exception]:
+    if task and os.path.exists(to_state_file(filename)):
+        raise DuplicateFileException(filename, task)
+    pathlib.Path(to_state_file(filename)).touch()
+    return None
 
 
 def queue_targets(task: Task) -> Optional[Exception]:
@@ -329,7 +341,7 @@ def queue_targets(task: Task) -> Optional[Exception]:
         return None
     if task.grouped:
         return None
-    return queue_files(f for f in expand_globs(task.targets))
+    return queue_files((f for f in expand_globs(task.targets)), task)
 
 
 def add_tied_if_missing(tt: Sequence[str]) -> bool:
@@ -643,4 +655,18 @@ class InvalidTargetsError(Exception):
         '''
         '''
         msg = 'Invalid initialization of task `{}`.  Only one of `targets` and `tied_targets` can be nonempty.'.format(task.name)
+        super().__init__(msg)
+
+
+class DuplicateFileException(Exception):
+    '''
+    '''
+
+    def __init__(self, filename: str, task: Task):
+        '''
+        '''
+        msg = 'Duplicate file detected: task `{}` contains multiple instances of file `{}` (likely a target).'.format(
+                task.name,
+                filename,
+                )
         super().__init__(msg)
