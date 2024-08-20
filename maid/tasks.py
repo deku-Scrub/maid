@@ -103,7 +103,7 @@ class Task:
 
     def get_modified_files(self) -> Iterable[str]:
         if self.parent and self.parent.tied_targets:
-            return pathlib.Path(to_state_file(self.targets[0])).read_text().split('\n')[0].split('\t')
+            return pathlib.Path(to_state_file(self.parent, self.targets[0])).read_text().split('\n')[0].split('\t')
         if self.parent:
             return self.parent.get_modified_files()
         if not os.path.exists(diff := to_state_file(self, suffix='.diff')):
@@ -112,14 +112,14 @@ class Task:
             return fis.readlines()
 
     def run_recipe(self, target: str = '') -> Iterable[Any]:
-        if target and self.tied_targets and (os.path.getsize(to_state_file(target)) > 0):
+        if target and self.tied_targets and (os.path.getsize(to_state_file(self, target)) > 0):
             return dataclasses.replace(
                     self,
                     name='',
                     targets=(target,),
                     tied_targets=None,
                     parent=self,
-                    required_files=pathlib.Path(to_state_file(target)).read_text().split('\n')[1].split('\t'),
+                    required_files=pathlib.Path(to_state_file(self, target)).read_text().split('\n')[1].split('\t'),
                     ).run_recipe()
         if target:
             return dataclasses.replace(
@@ -258,7 +258,7 @@ def dry_run(
         case _ as unreachable:
             assert_never(unreachable)
 
-    if is_queued(task.name):
+    if is_queued(task):
         return _format_dry_run(
                 prev_runs,
                 task,
@@ -279,7 +279,7 @@ def start_state_machine(task: Task) -> Optional[Exception]:
         return None
     if should_run(task) != RunReason.DONT_RUN:
         return start_run(task)
-    if is_queued(task.name):
+    if is_queued(task):
         return start_execution(task)
     return None
 
@@ -303,36 +303,36 @@ def should_run(task: Task) -> RunReason:
     return RunReason.DONT_RUN
 
 
+def remove_target_state(task: Task) -> Optional[Exception]:
+    return remove_files((
+        os.path.join('.maid', 'targets', _get_encoded_name(task.name)),
+        ))
+
+
 def start_run(task: Task) -> Optional[Exception]:
     if (err := setup_file_states(task)):
-        remove_files(str(f) for f in pathlib.Path('.maid/targets').glob('*'))
+        remove_target_state(task)
         traceback.print_exception(err)
         return err
     return start_execution(task)
 
 
-def dequeue_files(filenames: Iterable[str]) -> Optional[Exception]:
+def dequeue_files(filenames: Iterable[str], task: Task) -> Optional[Exception]:
     return try_function(
-            lambda: find_error(os.remove(to_state_file(f)) for f in filenames),
+            lambda: find_error(os.remove(to_state_file(task, f)) for f in filenames),
             )
 
 
-def queue_files(
-        filenames: Iterable[str],
-        task: Optional[Task] = None,
-        ) -> Optional[Exception]:
+def queue_files(filenames: Iterable[str], task: Task) -> Optional[Exception]:
     return try_function(
             lambda: find_error((_touch_file(f, task) for f in filenames))
             )
 
 
-def _touch_file(
-        filename: str,
-        task: Optional[Task] = None,
-        ) -> Optional[Exception]:
-    if task and os.path.exists(to_state_file(filename)):
+def _touch_file(filename: str, task: Task) -> Optional[Exception]:
+    if task and os.path.exists(to_state_file(task, filename)):
         raise DuplicateFileException(filename, task)
-    pathlib.Path(to_state_file(filename)).touch()
+    pathlib.Path(to_state_file(task, filename)).touch()
     return None
 
 
@@ -347,7 +347,7 @@ def queue_targets(task: Task) -> Optional[Exception]:
 def add_tied_if_missing(tt: Sequence[str], task: Task) -> bool:
     if os.path.exists(tt[0]):
         return False
-    if os.path.exists(state_file := to_state_file(tt[0])):
+    if os.path.exists(state_file := to_state_file(task, tt[0])):
         raise DuplicateFileException(tt[0], task)
     with open(state_file, mode='wt') as fos:
         fos.writelines('\n{required}'.format(required='\t'.join(tt[1:])))
@@ -355,7 +355,7 @@ def add_tied_if_missing(tt: Sequence[str], task: Task) -> bool:
 
 
 def diff_tied_target(tt: Sequence[str], diff_mmap: mmap.mmap, task: Task) -> bool:
-    if os.path.exists(state_file := to_state_file(tt[0])):
+    if os.path.exists(state_file := to_state_file(task, tt[0])):
         raise DuplicateFileException(tt[0], task)
     match '\t'.join(
             r
@@ -422,26 +422,35 @@ def diff_task_state(task: Task) -> Optional[Exception]:
                     )))
 
 
-def to_state_file(obj: str | Task, suffix: str = '') -> str:
-    if isinstance(obj, str):
-        return _filename_to_state_file(obj + suffix, 'targets')
-    if isinstance(obj, Task):
-        return _filename_to_state_file(obj.name + suffix, 'tasks')
-    raise RuntimeError('Unknown type given to `to_state_file`.  Only `str` and `Task` are accepted.')
+def to_state_file(task: Task, target: str = '', suffix: str = '') -> str:
+    if target:
+        return _filename_to_state_file(
+                target,
+                os.path.join('targets', _get_encoded_name(task.name))
+                )
+    return _filename_to_state_file(task.name + suffix, 'tasks')
+
+
+def _get_encoded_name(filename: str) -> str:
+    return base64.b64encode(filename.encode('utf-8')).decode('utf-8')
 
 
 def _filename_to_state_file(filename: str, dirname: str) -> str:
-    return os.path.join(
-            '.maid',
-            dirname,
-            base64.b64encode(filename.encode('utf-8')).decode('utf-8'),
-            )
+    return os.path.join('.maid', dirname, _get_encoded_name(filename))
+
+
+def setup_target_state(task: Task) -> Optional[Exception]:
+    return try_function(
+            lambda: os.makedirs(
+                os.path.join('.maid', 'targets', _get_encoded_name(task.name))
+                ))
 
 
 def setup_file_states(task: Task) -> Optional[Exception]:
     return find_error((
+        remove_target_state(task),
+        setup_target_state(task),
         diff_task_state(task),
-        queue_files((task.name,)),
         queue_targets(task),
         queue_tied_targets(task),
         try_function(lambda: shutil.copy(
@@ -501,7 +510,6 @@ def start_execution(task: Task, parallel: bool = False) -> Optional[Exception]:
     return cleanup_states(
             apply(_pexec, ((task, t) for t in _get_targets_to_execute(task))),
             task,
-            task.name,
             )
 
 
@@ -513,7 +521,7 @@ def _get_targets_to_execute(task: Task) -> Iterable[str]:
                 (tt[0] for tt in get_tied_targets(task)),
                 )
             for f in t
-            if is_queued(f)
+            if is_queued(task, f)
             )
 
 
@@ -524,12 +532,15 @@ def execute(task: Task, target: str = '') -> Optional[Exception]:
                 task,
                 target,
                 ),
-            target if target else task.name,
+            target,
+            task,
             )
 
 
-def is_queued(filename: str) -> bool:
-    return os.path.exists(to_state_file(filename))
+def is_queued(task: Task, filename: str = '') -> bool:
+    if not filename:
+        return os.path.exists(os.path.join('.maid', 'targets', _get_encoded_name(task.name)))
+    return os.path.exists(to_state_file(task, filename))
 
 
 def take_from_nonempty(
@@ -555,6 +566,7 @@ def expand_globs(filenames: Iterable[str]) -> Iterable[str]:
 
 
 def remove_files(filenames: Iterable[str]) -> Optional[Exception]:
+    filenames = list(filenames)
     return find_error(
             os.remove(f) if os.path.isfile(f) else shutil.rmtree(f)
             for f in filenames
@@ -608,20 +620,22 @@ def find_error(outputs: Iterable[object]) -> Optional[Exception]:
 def cleanup_state(
         error: Optional[Exception],
         filename: str,
+        task: Task,
         ) -> Optional[Exception]:
-    return error if error else dequeue_files((filename,))
+    if not filename:
+        return error
+    return error if error else dequeue_files((filename,), task)
 
 
 def cleanup_states(
         errors: Iterable[Optional[Exception]],
         task: Task,
-        filename: str = '',
         ) -> Optional[Exception]:
     return find_error((
         x
         for e in (
             (find_error(errors),),
-            (dequeue_files((filename,)),) if filename else tuple(),
+            (remove_target_state(task),),
             (remove_files((to_state_file(task, suffix='.diff'),)),),
             )
         for x in e
