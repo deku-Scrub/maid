@@ -611,9 +611,9 @@ def handle_error(
         ) -> Optional[Exception]:
     if target:
         if not os.path.exists(target):
-            return MissingTargetException(target)
+            return MissingTargetException(target, task)
     elif (f := next((f for f in expand_all_targets(task) if not os.path.exists(f)), '')):
-        return MissingTargetException(f)
+        return MissingTargetException(f, task)
     if not error:
         return None
     if task.remove_targets_on_failure:
@@ -679,10 +679,13 @@ class MissingTargetException(Exception):
     '''
     '''
 
-    def __init__(self, filename: str):
+    def __init__(self, filename: str, task: Task):
         '''
         '''
-        msg = 'Target `{}` was not created.'.format(filename)
+        msg = 'Target `{}` for task `{}` was not created.'.format(
+                filename,
+                task.name,
+                )
         super().__init__(msg)
 
 
