@@ -1,3 +1,4 @@
+import shlex
 import concurrent.futures
 import multiprocessing
 import re
@@ -140,6 +141,24 @@ class Task:
 
     def __str__(self) -> str:
         return str(self.recipe(self))
+
+    def qjoin_targets(self) -> str:
+        return self.join_targets(shlex.quote)
+
+    def join_targets(self, f: Callable[[str], str] = str) -> str:
+        return ' '.join(f(x) for x in expand_globs(self.targets))
+
+    def qjoin_modified_prereqs(self) -> str:
+        return self.join_modified_prereqs(shlex.quote)
+
+    def join_modified_prereqs(self, f: Callable[[str], str] = str) -> str:
+        return ' '.join(f(x) for x in self.get_modified_files())
+
+    def qjoin_prereqs(self) -> str:
+        return self.join_prereqs(shlex.quote)
+
+    def join_prereqs(self, f: Callable[[str], str] = str) -> str:
+        return ' '.join(f(x) for x in expand_requirements(self))
 
 
 def try_function(f: Callable[[], Any]) -> Optional[Exception]:

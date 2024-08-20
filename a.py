@@ -90,7 +90,7 @@ def h3(task: maid.tasks.Task) -> maid.compose.Recipe:
             output_stream=sys.stdout,
             ) \
                     | 'mkdir -p logs' \
-                    | f'touch {task.targets[0]}'
+                    | f'touch {task.qjoin_targets()}'
 
 
 @maid.decorators.task(
@@ -109,7 +109,7 @@ def h4(task: maid.tasks.Task) -> maid.compose.Recipe:
 
 
 
-print(maid.maids.get_maid().dry_run(verbose=False), file=sys.stderr)
+print(maid.maids.get_maid().dry_run(verbose=True), file=sys.stderr)
 maid.maids.get_maid().run()
 
 a = maid.compose.Recipe(inputs=(j for j in range(100))) \
