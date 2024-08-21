@@ -149,6 +149,10 @@ class Recipe:
                 truncate=truncate,
                 )
 
+    def exhaust(self) -> None:
+        for _ in self.run():
+            pass
+
     def run(self) -> Iterable[Any]:
         return self._postrun(
                 functools.reduce(
