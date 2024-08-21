@@ -1,7 +1,8 @@
 import itertools
-from typing import Optional, Iterable, Final
+from typing import Optional, Iterable, Final, Mapping
 
 import maid.tasks
+import maid.viz
 
 DEFAULT_MAID_NAME: Final[str] = 'm03'
 _MAIDS: Final[dict[str, '_Maid']] = dict()
@@ -102,6 +103,8 @@ class _Maid:
 
         return True
 
+    def save_graph(self, outfile: str) -> None:
+        maid.viz.save_graph(self._task_graph, outfile)
 
 def get_maid(maid_name: str = DEFAULT_MAID_NAME) -> _Maid:
     if not maid_name:

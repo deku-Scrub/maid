@@ -111,6 +111,7 @@ def h4(task: maid.tasks.Task) -> maid.compose.Recipe:
 
 print(maid.maids.get_maid().dry_run(verbose=True), file=sys.stderr)
 maid.maids.get_maid().run()
+maid.maids.get_maid().save_graph('graph.png')
 
 a = maid.compose.Recipe(inputs=(j for j in range(100))) \
     | (filter, lambda x: x % 3 == 0) \
